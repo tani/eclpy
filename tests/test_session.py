@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from fractions import Fraction
 import os
 from pathlib import Path
+import tempfile
+import unittest
 
-import pytest
-
-from ecl import EclError, EclSession
+from ecl import Cons, EclError, EclSession, Lisp, LispReference, List, SExp, Symbol
+from ecl.reader import parse_one
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,39 +19,197 @@ def require_wasm() -> Path:
     wasm_path = Path(os.environ["ECL_WASM"]) if "ECL_WASM" in os.environ else None
     wasm_path = wasm_path or (PACKAGE_WASM if PACKAGE_WASM.is_file() else BUILD_WASM)
     if not wasm_path.is_file():
-        pytest.skip("ECL WASM artifact is not built")
+        raise unittest.SkipTest("ECL WASM artifact is not built")
     return wasm_path
 
 
-def test_missing_wasm_has_actionable_error(tmp_path: Path) -> None:
-    missing = tmp_path / "missing.wasm"
-    with pytest.raises(FileNotFoundError, match="build_ecl_wasm.py"):
-        EclSession(missing)
+class EclSessionTests(unittest.TestCase):
+    def test_missing_wasm_has_actionable_error(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "missing.wasm"
+            with self.assertRaisesRegex(FileNotFoundError, "build_ecl_wasm.py"):
+                EclSession(missing)
+
+    def test_eval_arithmetic(self) -> None:
+        with EclSession(require_wasm()) as ecl:
+            self.assertEqual(ecl.eval("(+ 1 2)"), "3")
+
+    def test_eval_multiple_forms_returns_last_value(self) -> None:
+        with EclSession(require_wasm()) as ecl:
+            self.assertEqual(ecl.eval("(+ 1 2)\n(+ 3 4)"), "7")
+
+    def test_eval_keeps_session_state(self) -> None:
+        with EclSession(require_wasm()) as ecl:
+            self.assertEqual(ecl.eval("(defparameter *ecl-test-value* 41)"), "*ECL-TEST-VALUE*")
+            self.assertEqual(ecl.eval("(1+ *ecl-test-value*)"), "42")
+
+    def test_eval_error_raises_ecl_error(self) -> None:
+        with EclSession(require_wasm()) as ecl:
+            with self.assertRaises(EclError):
+                ecl.eval("(definitely-not-a-bound-function)")
+
+    def test_lisp_error_condition_raises_ecl_error(self) -> None:
+        with EclSession(require_wasm()) as ecl:
+            with self.assertRaisesRegex(EclError, "ECL evaluation escaped"):
+                ecl.eval('(error "boom from Lisp")')
 
 
-def test_eval_arithmetic() -> None:
-    with EclSession(require_wasm()) as ecl:
-        assert ecl.eval("(+ 1 2)") == "3"
+class LispApiTests(unittest.TestCase):
+    def test_lisp_eval_converts_python_forms(self) -> None:
+        with Lisp(require_wasm()) as lisp:
+            self.assertEqual(lisp.eval(42), 42)
+            self.assertEqual(lisp.eval(("+", 2, 3)), 5)
+            self.assertEqual(lisp.eval(("/", ("*", 3, 5), 2)), Fraction(15, 2))
+            self.assertEqual(
+                lisp.eval(("loop", "for", "i", "below", 5, "collect", "i")),
+                List(0, 1, 2, 3, 4),
+            )
+
+    def test_lisp_eval_rejects_source_strings(self) -> None:
+        with Lisp(require_wasm()) as lisp:
+            with self.assertRaisesRegex(TypeError, "SExp.raw"):
+                lisp.eval("(+ 1 2)")
+            self.assertFalse(hasattr(lisp, "eval_source"))
+
+    def test_lisp_eval_accepts_raw_sexp(self) -> None:
+        with Lisp(require_wasm()) as lisp:
+            self.assertEqual(lisp.eval(SExp.raw("(+ 1 2)")), 3)
+            self.assertEqual(lisp.eval(SExp.raw("(+ 1 2) (+ 3 4)")), 7)
+
+    def test_sexp_stringification(self) -> None:
+        form = SExp.list(
+            SExp.symbol("+"),
+            SExp.integer(1),
+            SExp.string('two "words" \\ ok'),
+            SExp.keyword("test_key"),
+            SExp.symbol("CAR", "COMMON-LISP"),
+            SExp.quote(SExp.symbol("FOO")),
+            SExp.function_quote(SExp.symbol("BAR")),
+            SExp.raw("(raw form)"),
+        )
+
+        self.assertEqual(
+            str(form),
+            '(+ 1 "two \\"words\\" \\\\ ok" :TEST-KEY COMMON-LISP::CAR '
+            '\'FOO #\'BAR (raw form))',
+        )
+        self.assertEqual(str(SExp.list()), "nil")
+
+    def test_lark_reader_parses_tagged_results(self) -> None:
+        self.assertEqual(parse_one('(:OK (:INT 42))'), [":OK", [":INT", 42]])
+        self.assertEqual(parse_one('(:STRING "a\\"b\\\\c")'), [":STRING", 'a"b\\c'])
+        self.assertEqual(parse_one('(:REF 7 "FUNCTION")'), [":REF", 7, "FUNCTION"])
+        self.assertEqual(
+            parse_one('(:DOTTED-LIST ((:INT 1) (:INT 2)) (:INT 3))'),
+            [
+                ":DOTTED-LIST",
+                [[":INT", 1], [":INT", 2]],
+                [":INT", 3],
+            ],
+        )
+
+        with self.assertRaises(EclError):
+            parse_one("(:INT 1")
+        with self.assertRaises(EclError):
+            parse_one("(:INT 1) (:INT 2)")
+
+    def test_lisp_list_preserves_strings(self) -> None:
+        with Lisp(require_wasm()) as lisp:
+            self.assertEqual(lisp.eval(List(Symbol("STRING="), "foo", "bar")), List())
+            self.assertIs(lisp.eval(List(Symbol("STRING="), "foo", "foo")), True)
+
+    def test_lisp_symbol_lookup_and_functions(self) -> None:
+        with Lisp(require_wasm()) as lisp:
+            self.assertEqual(lisp.eval(Symbol("*PRINT-BASE*", "COMMON-LISP")), 10)
+
+            add = lisp.function("+")
+            div = lisp.function("/")
+            self.assertEqual(add(1, 2, 3, 4), 10)
+            self.assertEqual(div(2, 4), Fraction(1, 2))
+
+    def test_lisp_package_attribute_api(self) -> None:
+        with Lisp(require_wasm()) as lisp:
+            cl = lisp.find_package("CL")
+
+            self.assertIs(cl.oddp(5), True)
+            self.assertEqual(cl.cons(5, None), List(5))
+            self.assertEqual(cl.remove(5, [1, -5, 2, 7, 5, 9], key=cl.abs), [1, 2, 7, 9])
+            self.assertEqual(cl.add(2, 3, 4, 5), 14)
+            self.assertIs(cl.gt(3, 2), True)
+            self.assertEqual(cl.stringgt("baz", "bar"), 2)
+            self.assertEqual(cl.print_base, 10)
+            self.assertGreater(cl.MOST_POSITIVE_DOUBLE_FLOAT, 1e300)
+            self.assertEqual(cl.mapcar(cl.constantly(4), (1, 2, 3)), List(4, 4, 4))
+
+    def test_lisp_macro_and_special_form_wrappers(self) -> None:
+        with Lisp(require_wasm()) as lisp:
+            cl = lisp.find_package("CL")
+
+            self.assertEqual(cl.loop("repeat", 5, "collect", 42), List(42, 42, 42, 42, 42))
+            self.assertEqual(cl.progn(5, 6, 7, ("+", 4, 4)), 8)
+            self.assertEqual(
+                lisp.eval(
+                    (
+                        "with-output-to-string",
+                        ("stream",),
+                        ("princ", 12, "stream"),
+                        ("princ", 34, "stream"),
+                    )
+                ),
+                "1234",
+            )
+
+    def test_lisp_cons_cells(self) -> None:
+        with Lisp(require_wasm()) as lisp:
+            cl = lisp.find_package("CL")
+
+            self.assertEqual(lisp.eval(("CONS", 1, 2)), Cons(1, 2))
+
+            lst = lisp.eval(("CONS", 1, ("CONS", 2, ())))
+            self.assertEqual(lst, List(1, 2))
+            self.assertEqual(lst.car, 1)
+            self.assertEqual(lst.cdr, List(2))
+            self.assertEqual(list(lst), [1, 2])
+            self.assertEqual(sum(lst), 3)
+
+            self.assertEqual(lisp.eval(("CONS", 1, ("CONS", 2, 3))), Cons(1, Cons(2, 3)))
+            twos = Cons(2, Cons(2, Cons(2, Cons(2))))
+            self.assertEqual(cl.mapcar(lisp.function("+"), (1, 2, 3, 4), twos), List(3, 4, 5, 6))
+
+    def test_lisp_high_level_error_has_condition_details(self) -> None:
+        with Lisp(require_wasm()) as lisp:
+            with self.assertRaises(EclError) as raised:
+                lisp.eval(SExp.raw('(error "boom from Lisp")'))
+
+        self.assertIsNotNone(raised.exception.condition_type)
+        self.assertIn("SIMPLE-ERROR", raised.exception.condition_type or "")
+        self.assertIn("boom from Lisp", raised.exception.message)
+
+    def test_lisp_reference_context_manager(self) -> None:
+        with Lisp(require_wasm()) as lisp:
+            cl = lisp.find_package("CL")
+            reference = cl.constantly(4)
+
+            self.assertIsInstance(reference, LispReference)
+            with reference as fn:
+                self.assertEqual(cl.mapcar(fn, (1, 2, 3)), List(4, 4, 4))
+
+            self.assertTrue(reference.released)
+            reference.release()
+            with self.assertRaisesRegex(EclError, "released Lisp reference"):
+                cl.mapcar(reference, (1, 2, 3))
+
+    def test_lisp_close_releases_outstanding_references(self) -> None:
+        lisp = Lisp(require_wasm())
+        reference = lisp.find_package("CL").constantly(4)
+
+        self.assertIsInstance(reference, LispReference)
+        self.assertFalse(reference.released)
+
+        lisp.close()
+
+        self.assertTrue(reference.released)
 
 
-def test_eval_multiple_forms_returns_last_value() -> None:
-    with EclSession(require_wasm()) as ecl:
-        assert ecl.eval("(+ 1 2)\n(+ 3 4)") == "7"
-
-
-def test_eval_keeps_session_state() -> None:
-    with EclSession(require_wasm()) as ecl:
-        assert ecl.eval("(defparameter *ecl-test-value* 41)") == "*ECL-TEST-VALUE*"
-        assert ecl.eval("(1+ *ecl-test-value*)") == "42"
-
-
-def test_eval_error_raises_ecl_error() -> None:
-    with EclSession(require_wasm()) as ecl:
-        with pytest.raises(EclError):
-            ecl.eval("(definitely-not-a-bound-function)")
-
-
-def test_lisp_error_condition_raises_ecl_error() -> None:
-    with EclSession(require_wasm()) as ecl:
-        with pytest.raises(EclError, match="ECL evaluation escaped"):
-            ecl.eval('(error "boom from Lisp")')
+if __name__ == "__main__":
+    unittest.main()
