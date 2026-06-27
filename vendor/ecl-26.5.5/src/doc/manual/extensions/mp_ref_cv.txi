@@ -1,0 +1,87 @@
+@node Condition variables
+@subsection Condition variables
+
+Condition variables are used to wait for a particular condition becoming
+true (e.g new client connects to the server).
+
+@node Condition variables dictionary
+@subsection Condition variables dictionary
+
+
+@cppdef mp_make_condition_variable
+@lspdef mp:make-condition-variable
+
+@deftypefun cl_object mp_make_condition_variable ()
+@end deftypefun
+
+@defun mp:make-condition-variable
+Creates a condition variable.
+@end defun
+
+
+@cppdef mp_condition_variable_wait
+@lspdef mp:condition-variable-wait
+
+@deftypefun cl_object mp_condition_variable_wait (cl_object cv, cl_object lock)
+@end deftypefun
+
+@defun mp:condition-variable-wait cv lock
+Release @var{lock} and suspend thread until
+@coderef{mp:condition-variable-signal} or
+@coderef{mp:condition-variable-broadcast} is called on @var{cv}. When
+thread resumes re-aquire @var{lock}. Always returns @code{t}. May signal
+an error if @var{lock} is not owned by the current thread.
+
+@strong{Note:} In some circumstances, the thread may wake up even if no
+call to @coderef{mp:condition-variable-signal} or
+@coderef{mp:condition-variable-broadcast} has happened. It is
+recommended to check for the condition that triggered the wait in a loop
+around any @code{mp:condition-variable-wait} call.
+
+@strong{Note:} While the condition variable is blocked waiting for a
+signal or broadcast event, calling @code{mp:condition-variable-wait}
+from further threads must be done using the same mutex as that used by
+the threads that are already waiting on this condition variable. The
+behaviour is undefined if this constraint is violated.
+@end defun
+
+
+@cppdef mp_condition_variable_timedwait
+@lspdef mp:condition-variable-timedwait
+
+@deftypefun cl_object mp_condition_variable_timedwait (cl_object cv, cl_object lock, cl_object seconds)
+@end deftypefun
+
+@defun mp:condition-variable-timedwait cv lock seconds
+@coderef{mp:condition-variable-wait} which timeouts after @var{seconds}
+seconds. Returns @code{nil} on timeout and @code{t} otherwise. May
+signal an error if @var{lock} is not owned by the current thread.
+@end defun
+
+
+@cppdef mp_condition_variable_signal
+@lspdef mp:condition-variable-signal
+
+@deftypefun cl_object mp_condition_variable_signal (cl_object cv)
+@end deftypefun
+
+@defun mp:condition-variable-signal cv
+Wake up at least one of the waiters of @var{cv}. Usually, this will wake
+up only a single thread, but it may also wake up multiple threads.
+Always returns @code{t}.
+
+See @coderef{mp:condition-variable-wait}.
+@end defun
+
+
+@cppdef mp_condition_variable-broadcast
+@lspdef mp:condition-variable-broadcast
+
+@deftypefun cl_object mp_condition_variable_broadcast (cl_object cv)
+@end deftypefun
+
+@defun mp:condition-variable-broadcast cv
+Wake up all waiters of @var{cv}. Always returns @code{t}.
+
+See @coderef{mp:condition-variable-wait}.  
+@end defun
