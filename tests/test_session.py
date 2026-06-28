@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 
+import ecl.simple as L
 from ecl import Cons, EclError, EclSession, Lisp, LispReference, List, SExp, Symbol
 from ecl.reader import parse_one
 
@@ -63,7 +64,11 @@ class EclSessionTests(unittest.TestCase):
             [
                 sys.executable,
                 "-c",
-                "import ecl; lisp = ecl.Lisp(); print(lisp.eval(('+', 1, 2)))",
+                (
+                    "import ecl; lisp = ecl.Lisp(); "
+                    "print(lisp.eval(ecl.SExp.list(ecl.SExp.symbol('+'), "
+                    "ecl.SExp.integer(1), ecl.SExp.integer(2))))"
+                ),
             ],
             env=env,
             text=True,
@@ -76,26 +81,71 @@ class EclSessionTests(unittest.TestCase):
 
 
 class LispApiTests(unittest.TestCase):
-    def test_lisp_eval_converts_python_forms(self) -> None:
+    def test_lisp_eval_accepts_explicit_sexp_only(self) -> None:
         with Lisp(require_wasm()) as lisp:
-            self.assertEqual(lisp.eval(42), 42)
-            self.assertEqual(lisp.eval(("+", 2, 3)), 5)
-            self.assertEqual(lisp.eval(("/", ("*", 3, 5), 2)), Fraction(15, 2))
+            self.assertEqual(lisp.eval(SExp.integer(42)), 42)
             self.assertEqual(
-                lisp.eval(("loop", "for", "i", "below", 5, "collect", "i")),
-                List(0, 1, 2, 3, 4),
+                lisp.eval(
+                    SExp.list(
+                        SExp.symbol("+"),
+                        SExp.integer(2),
+                        SExp.integer(3),
+                    )
+                ),
+                5,
+            )
+            self.assertEqual(
+                lisp.eval(
+                    SExp.list(
+                        SExp.symbol("/"),
+                        SExp.list(SExp.symbol("*"), SExp.integer(3), SExp.integer(5)),
+                        SExp.integer(2),
+                    )
+                ),
+                Fraction(15, 2),
             )
 
-    def test_lisp_eval_rejects_source_strings(self) -> None:
+    def test_lisp_eval_rejects_shorthand_inputs(self) -> None:
         with Lisp(require_wasm()) as lisp:
-            with self.assertRaisesRegex(TypeError, "SExp.raw"):
+            with self.assertRaisesRegex(TypeError, "only accepts SExp"):
+                lisp.eval(42)
+            with self.assertRaisesRegex(TypeError, "only accepts SExp"):
                 lisp.eval("(+ 1 2)")
+            with self.assertRaisesRegex(TypeError, "only accepts SExp"):
+                lisp.eval((Symbol("+"), 1, 2))
+            with self.assertRaisesRegex(TypeError, "only accepts SExp"):
+                lisp.eval(Symbol("FOO"))
             self.assertFalse(hasattr(lisp, "eval_source"))
 
     def test_lisp_eval_accepts_raw_sexp(self) -> None:
         with Lisp(require_wasm()) as lisp:
             self.assertEqual(lisp.eval(SExp.raw("(+ 1 2)")), 3)
             self.assertEqual(lisp.eval(SExp.raw("(+ 1 2) (+ 3 4)")), 7)
+
+    def test_simple_api_builds_shorthand_sexp(self) -> None:
+        with Lisp(require_wasm()) as lisp:
+            self.assertEqual(lisp.eval(L.expr(1)), 1)
+            self.assertEqual(lisp.eval(L.expr(("+", 1, 1))), 2)
+            with self.assertRaises(TypeError):
+                L.expr("+", 1, 1)  # type: ignore[call-arg]
+
+            self.assertEqual(
+                lisp.eval(L.expr(("/", ("*", 3, 5), 2))),
+                Fraction(15, 2),
+            )
+            self.assertIs(
+                lisp.eval(L.expr(("STRING=", L.string("foo"), L.string("foo")))),
+                True,
+            )
+            self.assertEqual(
+                lisp.eval(L.expr(("loop", "for", "i", "below", 5, "collect", "i"))),
+                List(0, 1, 2, 3, 4),
+            )
+            self.assertEqual(
+                lisp.eval(L.expr(("mapcar", L.function("+"), (1, 2), (3, 4)))),
+                List(4, 6),
+            )
+            self.assertFalse(hasattr(L, "fn"))
 
     def test_sexp_stringification(self) -> None:
         form = SExp.list(
@@ -134,14 +184,27 @@ class LispApiTests(unittest.TestCase):
         with self.assertRaises(EclError):
             parse_one("(:INT 1) (:INT 2)")
 
-    def test_lisp_list_preserves_strings(self) -> None:
+    def test_lisp_values_keep_strings_and_symbols_distinct(self) -> None:
         with Lisp(require_wasm()) as lisp:
-            self.assertEqual(lisp.eval(List(Symbol("STRING="), "foo", "bar")), List())
-            self.assertIs(lisp.eval(List(Symbol("STRING="), "foo", "foo")), True)
+            self.assertEqual(
+                lisp.eval(L.expr(("STRING=", L.string("foo"), L.string("bar")))),
+                List(),
+            )
+            self.assertIs(
+                lisp.eval(L.expr(("STRING=", L.string("foo"), L.string("foo")))),
+                True,
+            )
+
+            string_value = lisp.eval(SExp.raw('"CAR"'))
+            symbol_value = lisp.eval(SExp.raw("'CL:CAR"))
+            self.assertIsInstance(string_value, str)
+            self.assertIsInstance(symbol_value, Symbol)
+            self.assertNotEqual(string_value, symbol_value)
+            self.assertEqual(lisp.function("SYMBOL-NAME")(Symbol("FOO")), "FOO")
 
     def test_lisp_symbol_lookup_and_functions(self) -> None:
         with Lisp(require_wasm()) as lisp:
-            self.assertEqual(lisp.eval(Symbol("*PRINT-BASE*", "COMMON-LISP")), 10)
+            self.assertEqual(lisp.eval(SExp.symbol("*PRINT-BASE*", "COMMON-LISP")), 10)
 
             add = lisp.function("+")
             div = lisp.function("/")
@@ -166,15 +229,18 @@ class LispApiTests(unittest.TestCase):
         with Lisp(require_wasm()) as lisp:
             cl = lisp.find_package("CL")
 
-            self.assertEqual(cl.loop("repeat", 5, "collect", 42), List(42, 42, 42, 42, 42))
-            self.assertEqual(cl.progn(5, 6, 7, ("+", 4, 4)), 8)
+            self.assertEqual(
+                cl.loop(Symbol("REPEAT"), 5, Symbol("COLLECT"), 42),
+                List(42, 42, 42, 42, 42),
+            )
+            self.assertEqual(cl.progn(5, 6, 7, (Symbol("+"), 4, 4)), 8)
             self.assertEqual(
                 lisp.eval(
-                    (
-                        "with-output-to-string",
-                        ("stream",),
-                        ("princ", 12, "stream"),
-                        ("princ", 34, "stream"),
+                    SExp.list(
+                        SExp.symbol("WITH-OUTPUT-TO-STRING"),
+                        SExp.list(SExp.symbol("STREAM")),
+                        SExp.list(SExp.symbol("PRINC"), SExp.integer(12), SExp.symbol("STREAM")),
+                        SExp.list(SExp.symbol("PRINC"), SExp.integer(34), SExp.symbol("STREAM")),
                     )
                 ),
                 "1234",
@@ -184,16 +250,36 @@ class LispApiTests(unittest.TestCase):
         with Lisp(require_wasm()) as lisp:
             cl = lisp.find_package("CL")
 
-            self.assertEqual(lisp.eval(("CONS", 1, 2)), Cons(1, 2))
+            self.assertEqual(
+                lisp.eval(
+                    SExp.list(SExp.symbol("CONS"), SExp.integer(1), SExp.integer(2))
+                ),
+                Cons(1, 2),
+            )
 
-            lst = lisp.eval(("CONS", 1, ("CONS", 2, ())))
+            lst = lisp.eval(
+                SExp.list(
+                    SExp.symbol("CONS"),
+                    SExp.integer(1),
+                    SExp.list(SExp.symbol("CONS"), SExp.integer(2), SExp.list()),
+                )
+            )
             self.assertEqual(lst, List(1, 2))
             self.assertEqual(lst.car, 1)
             self.assertEqual(lst.cdr, List(2))
             self.assertEqual(list(lst), [1, 2])
             self.assertEqual(sum(lst), 3)
 
-            self.assertEqual(lisp.eval(("CONS", 1, ("CONS", 2, 3))), Cons(1, Cons(2, 3)))
+            self.assertEqual(
+                lisp.eval(
+                    SExp.list(
+                        SExp.symbol("CONS"),
+                        SExp.integer(1),
+                        SExp.list(SExp.symbol("CONS"), SExp.integer(2), SExp.integer(3)),
+                    )
+                ),
+                Cons(1, Cons(2, 3)),
+            )
             twos = Cons(2, Cons(2, Cons(2, Cons(2))))
             self.assertEqual(cl.mapcar(lisp.function("+"), (1, 2, 3, 4), twos), List(3, 4, 5, 6))
 

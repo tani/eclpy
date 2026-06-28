@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Self
 
 from .decode import decode_result, decode_value, node_tag, optional_string, symbol_atom
-from .encode import keyword_parts, to_data_expr, to_expr
+from .encode import keyword_parts, to_data_expr, to_syntax_expr
 from .objects import LispReference, Symbol
 from .reader import parse_one
 from .runtime_lisp import HELPER_SOURCE
@@ -39,13 +39,13 @@ class LispFunction:
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         if self.kind in {"macro", "special"}:
             parts = [self._operator()]
-            parts.extend(to_expr(arg, tuple_strings_as_symbols=True) for arg in args)
-            parts.extend(keyword_parts(kwargs, tuple_strings_as_symbols=True))
+            parts.extend(to_syntax_expr(arg) for arg in args)
+            parts.extend(keyword_parts(kwargs, values_as_expr=True))
             return self.lisp._eval_sexp(SExp.list(*parts))
 
         parts = [self._operator()]
         parts.extend(to_data_expr(arg) for arg in args)
-        parts.extend(keyword_parts(kwargs, tuple_strings_as_symbols=False))
+        parts.extend(keyword_parts(kwargs, values_as_expr=False))
         return self.lisp._eval_sexp(SExp.list(*parts))
 
     def _operator(self) -> SExp:
@@ -112,13 +112,11 @@ class Lisp:
         self.session.eval(HELPER_SOURCE)
 
     def eval(self, form: Any) -> Any:
-        """Evaluate a Python Lisp form or explicit S-expression."""
+        """Evaluate an explicit S-expression."""
 
-        if isinstance(form, str):
-            raise TypeError("Lisp.eval does not accept source strings; use SExp.raw")
-        return self._eval_sexp(
-            form if isinstance(form, SExp) else to_expr(form, tuple_strings_as_symbols=True)
-        )
+        if not isinstance(form, SExp):
+            raise TypeError("Lisp.eval only accepts SExp; use ecl.SExp.* or ecl.simple.expr(...)")
+        return self._eval_sexp(form)
 
     def function(self, name: str, package: str | None = None) -> LispFunction:
         return LispFunction(self, name.upper(), package)

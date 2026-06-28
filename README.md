@@ -34,18 +34,26 @@ from fractions import Fraction
 import ecl
 
 with ecl.Lisp() as lisp:
-    assert lisp.eval(42) == 42
-    assert lisp.eval(("+", 2, 3)) == 5
-    assert lisp.eval(("/", ("*", 3, 5), 2)) == Fraction(15, 2)
-    assert lisp.eval(("loop", "for", "i", "below", 5, "collect", "i")) == ecl.List(
-        0, 1, 2, 3, 4
-    )
+    assert lisp.eval(ecl.SExp.integer(42)) == 42
+    assert lisp.eval(
+        ecl.SExp.list(
+            ecl.SExp.symbol("+"),
+            ecl.SExp.integer(2),
+            ecl.SExp.integer(3),
+        )
+    ) == 5
+    assert lisp.eval(
+        ecl.SExp.list(
+            ecl.SExp.symbol("/"),
+            ecl.SExp.list(ecl.SExp.symbol("*"), ecl.SExp.integer(3), ecl.SExp.integer(5)),
+            ecl.SExp.integer(2),
+        )
+    ) == Fraction(15, 2)
 ```
 
-Python tuples are treated as Lisp forms. Strings inside tuples are converted to
-symbols, matching cl4py's short notation. `Lisp.eval` does not accept raw Python
-source strings; use `ecl.SExp.raw(...)` when you intentionally need raw Lisp
-source:
+`Lisp.eval` only accepts explicit `ecl.SExp` values. It does not accept Python
+values, tuples, `Symbol` objects, or source strings directly. Use
+`ecl.SExp.raw(...)` when you intentionally need raw Lisp source:
 
 ```python
 with ecl.Lisp() as lisp:
@@ -53,13 +61,33 @@ with ecl.Lisp() as lisp:
     assert lisp.eval(ecl.SExp.raw("(+ 1 2) (+ 3 4)")) == 7
 ```
 
-Use `ecl.List` when you need strings to remain Lisp strings:
+For shorthand syntax, use the separate Simple API layer:
 
 ```python
+import ecl.simple as L
+
 with ecl.Lisp() as lisp:
-    form = ecl.List(ecl.Symbol("STRING="), "foo", "foo")
+    assert lisp.eval(L.expr(1)) == 1
+    assert lisp.eval(L.expr(("+", 1, 1))) == 2
+    assert lisp.eval(L.expr(("/", ("*", 3, 5), 2))) == Fraction(15, 2)
+    assert lisp.eval(L.expr(("loop", "for", "i", "below", 5, "collect", "i"))) == ecl.List(
+        0, 1, 2, 3, 4
+    )
+```
+
+`L.expr` takes one Python value. Use `L.expr(("+", 1, 1))`, not
+`L.expr("+", 1, 1)`.
+
+Strings and symbols stay distinct on both sides of the bridge:
+
+```python
+import ecl.simple as L
+
+with ecl.Lisp() as lisp:
+    form = L.expr(("STRING=", L.string("foo"), L.string("foo")))
     assert lisp.eval(form) is True
-    assert lisp.eval(ecl.Symbol("*PRINT-BASE*", "COMMON-LISP")) == 10
+    assert lisp.eval(ecl.SExp.symbol("*PRINT-BASE*", "COMMON-LISP")) == 10
+    assert lisp.eval(ecl.SExp.raw("'CL:CAR")) == ecl.Symbol("CAR", "COMMON-LISP")
 ```
 
 You can look up functions and packages:
@@ -99,17 +127,25 @@ with ecl.Lisp() as lisp:
 
 ```python
 with ecl.Lisp() as lisp:
-    assert lisp.eval(("CONS", 1, 2)) == ecl.Cons(1, 2)
+    assert lisp.eval(
+        ecl.SExp.list(ecl.SExp.symbol("CONS"), ecl.SExp.integer(1), ecl.SExp.integer(2))
+    ) == ecl.Cons(1, 2)
 
-    values = lisp.eval(("CONS", 1, ("CONS", 2, ())))
+    values = lisp.eval(
+        ecl.SExp.list(
+            ecl.SExp.symbol("CONS"),
+            ecl.SExp.integer(1),
+            ecl.SExp.list(ecl.SExp.symbol("CONS"), ecl.SExp.integer(2), ecl.SExp.list()),
+        )
+    )
     assert values == ecl.List(1, 2)
     assert values.car == 1
     assert list(values) == [1, 2]
 ```
 
-Internally, Python values are converted to an `ecl.SExp` syntax tree first. The
-WASM bridge only receives Lisp source after `str(sexp)` renders that tree at the
-runtime boundary.
+The high-level `Lisp.eval` boundary receives an `ecl.SExp` tree. Function calls
+and the optional Simple API layer construct that tree before the WASM bridge
+receives rendered Lisp source.
 
 By default `Lisp()` and `EclSession()` load the packaged `ecl/ecl_eval.wasm`. To
 use a different runtime, pass `wasm_path=` or set `ECL_WASM`.
@@ -167,7 +203,7 @@ You can smoke-test the built wheel outside the source tree:
 ```sh
 uv run --no-project --isolated \
   --with dist/ecl-0.1.0-py3-none-any.whl \
-  python -c 'import ecl; print(ecl.Lisp().eval(("+", 10, 32)))'
+  python -c 'import ecl; import ecl.simple as L; print(ecl.Lisp().eval(L.expr(("+", 10, 32))))'
 ```
 
 ## Test
@@ -176,8 +212,8 @@ uv run --no-project --isolated \
 uv run python -m unittest
 ```
 
-The tests cover raw low-level evaluation, Python-form evaluation, explicit
-`SExp.raw` evaluation, package/function lookup, macros and special forms,
+The tests cover raw low-level evaluation, strict `SExp` evaluation, Simple API
+shorthand evaluation, package/function lookup, macros and special forms,
 cons/list conversion, higher-order Lisp functions, reference lifecycle, result
 parsing, missing runtime errors, and Lisp-side exceptions.
 

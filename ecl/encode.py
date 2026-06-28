@@ -8,33 +8,21 @@ from .session import EclError
 from .sexp import SExp
 
 
-def to_expr(value: Any, *, tuple_strings_as_symbols: bool) -> SExp:
+def to_syntax_expr(value: Any) -> SExp:
     if isinstance(value, SExp):
         return value
-    if isinstance(value, tuple) and not isinstance(value, List):
+    if isinstance(value, tuple):
         if not value:
             return SExp.atom("nil")
-        return SExp.list(
-            *(
-                to_expr_item(item, tuple_strings_as_symbols=tuple_strings_as_symbols)
-                for item in value
+        if isinstance(value[0], str):
+            raise TypeError(
+                "Lisp form operators must be ecl.Symbol instances; "
+                f"use Symbol({value[0]!r}) instead of {value[0]!r}"
             )
-        )
-    if isinstance(value, List):
-        if not value:
-            return SExp.atom("nil")
-        return SExp.list(*(to_expr(item, tuple_strings_as_symbols=False) for item in value))
-    if isinstance(value, str) and tuple_strings_as_symbols:
-        return SExp.symbol(value.upper())
+        return SExp.list(*(to_syntax_expr(item) for item in value))
     if isinstance(value, Symbol):
         return SExp.symbol(value.name, value.package)
     return to_data_expr(value)
-
-
-def to_expr_item(value: Any, *, tuple_strings_as_symbols: bool) -> SExp:
-    if isinstance(value, str) and tuple_strings_as_symbols:
-        return SExp.symbol(value.upper())
-    return to_expr(value, tuple_strings_as_symbols=tuple_strings_as_symbols)
 
 
 def to_data_expr(value: Any) -> SExp:
@@ -79,14 +67,11 @@ def to_data_expr(value: Any) -> SExp:
     raise TypeError(f"cannot convert {type(value).__name__} to Lisp")
 
 
-def keyword_parts(kwargs: dict[str, Any], *, tuple_strings_as_symbols: bool) -> list[SExp]:
+def keyword_parts(kwargs: dict[str, Any], *, values_as_expr: bool) -> list[SExp]:
     parts: list[SExp] = []
     for key, value in kwargs.items():
         parts.append(SExp.keyword(key))
-        if tuple_strings_as_symbols:
-            parts.append(to_expr(value, tuple_strings_as_symbols=True))
-        else:
-            parts.append(to_data_expr(value))
+        parts.append(to_syntax_expr(value) if values_as_expr else to_data_expr(value))
     return parts
 
 
