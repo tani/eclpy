@@ -186,13 +186,12 @@ parsing, missing runtime errors, and Lisp-side exceptions.
 The current Emscripten build emits a core wasm module that imports
 `wasi_snapshot_preview1` plus Emscripten `env` functions. The Python loader
 provides the minimal Emscripten compatibility shims needed by this runtime.
+The build disables ECL's runtime stack-size probing on Emscripten, avoiding the
+unsupported `prlimit64` startup syscall path.
 
 WASI 0.3 requires a component-model toolchain/runtime path. The local
 Emscripten 6.0.1 and `wasmtime` Python package used here do not expose that path,
 so this package hosts the Preview 1 module directly.
-
-Emscripten prints `warning: unsupported syscall: __syscall_prlimit64` during ECL
-startup. It has not blocked initialization or evaluation in the current tests.
 
 ## License
 

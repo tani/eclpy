@@ -3,6 +3,8 @@ from __future__ import annotations
 from fractions import Fraction
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -13,6 +15,7 @@ from ecl.reader import parse_one
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_WASM = ROOT / "ecl" / "ecl_eval.wasm"
 BUILD_WASM = ROOT / "build" / "ecl" / "ecl_eval.wasm"
+UNSUPPORTED_PRLIMIT64_WARNING = "unsupported syscall: __syscall_prlimit64"
 
 
 def require_wasm() -> Path:
@@ -52,6 +55,24 @@ class EclSessionTests(unittest.TestCase):
         with EclSession(require_wasm()) as ecl:
             with self.assertRaisesRegex(EclError, "ECL evaluation escaped"):
                 ecl.eval('(error "boom from Lisp")')
+
+    def test_startup_does_not_warn_about_prlimit64(self) -> None:
+        env = os.environ.copy()
+        env["ECL_WASM"] = str(require_wasm())
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import ecl; lisp = ecl.Lisp(); print(lisp.eval(('+', 1, 2)))",
+            ],
+            env=env,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+        self.assertEqual(completed.stdout.strip(), "3")
+        self.assertNotIn(UNSUPPORTED_PRLIMIT64_WARNING, completed.stderr)
 
 
 class LispApiTests(unittest.TestCase):

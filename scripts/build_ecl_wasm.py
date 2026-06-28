@@ -34,6 +34,7 @@ EXPORTED_FUNCTIONS = (
     "['_eclpy_alloc','_eclpy_free','_eclpy_init','_eclpy_eval',"
     "'_eclpy_last_error','_eclpy_shutdown','_malloc','_free']"
 )
+UNSUPPORTED_PRLIMIT64_WARNING = "unsupported syscall: __syscall_prlimit64"
 
 
 def run(*args: str, cwd: Path | None = None, env: dict[str, str] | None = None) -> None:
@@ -112,12 +113,21 @@ def build_wasm(host_ecl: Path, force: bool) -> Path:
 
 def patch_configure(source: Path) -> None:
     configure = source / "src" / "configure"
-    old = (
-        'LDFLAGS="${LDFLAGS} -sSTACK_SIZE=1048576 '
-        '-sBINARYEN_EXTRA_PASSES=--spill-pointers"'
+    replacements = (
+        (
+            'LDFLAGS="${LDFLAGS} -sSTACK_SIZE=1048576 '
+            '-sBINARYEN_EXTRA_PASSES=--spill-pointers"',
+            'LDFLAGS="${LDFLAGS} -sSTACK_SIZE=1048576"',
+        ),
+        (
+            'printf "%s\\n" "#define ECL_CAN_SET_STACK_SIZE /**/" >>confdefs.h',
+            ': "${ecl_cv_skip_stack_size_probe:=yes}"',
+        ),
     )
     text = configure.read_text()
-    configure.write_text(text.replace(old, 'LDFLAGS="${LDFLAGS} -sSTACK_SIZE=1048576"'))
+    for old, new in replacements:
+        text = text.replace(old, new)
+    configure.write_text(text)
 
 
 def without_spill_pointers(flags: str) -> str:
@@ -185,7 +195,19 @@ def smoke_test() -> None:
         "    ecl.eval('(defparameter *x* 41)')\n"
         "    assert ecl.eval('(1+ *x*)') == '42'\n"
     )
-    run(sys.executable, "-c", code)
+    print(f"+ {sys.executable} -c {code!r}", flush=True)
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    if UNSUPPORTED_PRLIMIT64_WARNING in completed.stderr:
+        raise SystemExit(completed.stderr.strip())
+    if completed.stdout:
+        print(completed.stdout, end="")
+    if completed.stderr:
+        print(completed.stderr, end="", file=sys.stderr)
 
 
 def parse_args() -> argparse.Namespace:
