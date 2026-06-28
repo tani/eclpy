@@ -191,6 +191,45 @@ class LispApiTests(unittest.TestCase):
         with Lisp(require_wasm()) as lisp, self.assertRaisesRegex(EclError, "REQUIRE"):
             lisp.eval(SExp.raw("(require 'no-such-module-xyz)"))
 
+    def test_asdf_loads_a_source_project(self) -> None:
+        require_asdf_source()
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            (project / "demo.asd").write_text(
+                '(defsystem "demo" :serial t :components'
+                ' ((:file "pkg") (:file "math")))\n',
+                encoding="utf-8",
+            )
+            (project / "pkg.lisp").write_text(
+                "(defpackage :demo (:use :cl) (:export :add))\n", encoding="utf-8"
+            )
+            (project / "math.lisp").write_text(
+                "(in-package :demo)\n(defun add (a b) (+ a b))\n", encoding="utf-8"
+            )
+
+            with Lisp(require_wasm()) as lisp:
+                lisp.eval(SExp.raw("(require 'asdf)"))
+                # probe-file/file-write-date now see the real host file.
+                self.assertIs(
+                    lisp.eval(SExp.raw(f"(and (probe-file #p{SExp.string(str(project))}/) t)")),
+                    True,
+                )
+                lisp.eval(
+                    SExp.raw(f"(push #p{SExp.string(str(project) + '/')} asdf:*central-registry*)")
+                )
+                lisp.eval(SExp.raw('(asdf:load-system "demo")'))
+                self.assertEqual(lisp.eval(SExp.raw("(demo:add 20 22)")), 42)
+
+    def test_truename_of_missing_host_file_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, Lisp(require_wasm()) as lisp:
+            missing = Path(directory) / "missing.lisp"
+            self.assertEqual(
+                lisp.eval(SExp.raw(f"(probe-file #p{SExp.string(str(missing))})")),
+                List(),
+            )
+            with self.assertRaises(EclError):
+                lisp.eval(SExp.raw(f"(truename #p{SExp.string(str(missing))})"))
+
     def test_simple_api_builds_shorthand_sexp(self) -> None:
         with Lisp(require_wasm()) as lisp:
             self.assertEqual(lisp.eval(L.expr(1)), 1)

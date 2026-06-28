@@ -56,15 +56,49 @@ HELPER_SOURCE = r"""
          (*load-truename* pathname))
     (native-load pathname verbose print if-does-not-exist external-format)))
 
+;; The WASM sandbox has no real filesystem; ECL's open/stat resolve to an empty
+;; in-memory FS. Route file existence, resolution, and timestamps through the
+;; host bridge (host-stat) so that probe-file, truename, and file-write-date see
+;; real host files. ASDF's find-system, in particular, only loads a system
+;; definition when file-write-date returns a usable stamp.
+(defun host-probe-file (pathspec &rest ignored)
+  (declare (ignore ignored))
+  (let ((pathname (merge-pathnames pathspec)))
+    (and (host-stat pathname) pathname)))
+
+(defun host-truename (pathspec &rest ignored)
+  (declare (ignore ignored))
+  (let ((pathname (merge-pathnames pathspec)))
+    (if (host-stat pathname)
+        pathname
+        (error 'file-error :pathname pathname))))
+
+(defun host-file-write-date (pathspec &rest ignored)
+  (declare (ignore ignored))
+  (let ((info (host-stat (merge-pathnames pathspec))))
+    (if info
+        (cdr info)
+        (error 'file-error :pathname pathspec))))
+
 (let ((previous-lock (si::package-lock "CL" nil)))
   (unwind-protect
-       (setf (symbol-function 'cl:load) #'load)
+       (progn
+         (setf (symbol-function 'cl:load) #'load)
+         (setf (symbol-function 'cl:probe-file) #'host-probe-file)
+         (setf (symbol-function 'cl:truename) #'host-truename)
+         (setf (symbol-function 'cl:file-write-date) #'host-file-write-date))
     (si::package-lock "CL" previous-lock)))
 
 (defun provide-asdf (module)
   "REQUIRE provider that loads the bundled ASDF source for module ASDF."
   (when (and *asdf-source* (string-equal (string module) "ASDF"))
     (load *asdf-source*)
+    ;; Compilation cannot write output in the sandbox, so make LOAD-SYSTEM load
+    ;; source directly instead of compiling.
+    (let ((operation (find-symbol "*LOAD-SYSTEM-OPERATION*" "ASDF"))
+          (source-op (find-symbol "LOAD-SOURCE-OP" "ASDF")))
+      (when (and operation source-op (boundp operation))
+        (set operation source-op)))
     (provide "ASDF")
     t))
 

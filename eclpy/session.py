@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import stat as stat_module
+import struct
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -202,6 +204,8 @@ def _env_import(name: str, *, has_result: bool) -> Callable[..., Any]:
         match name:
             case "eclpy_read_file":
                 return _read_host_file(caller, *args)
+            case "eclpy_stat":
+                return _stat_host_file(caller, *args)
             case "emscripten_notify_memory_growth":
                 return None
             case "_emscripten_system":
@@ -250,6 +254,33 @@ def _read_host_file(
     return 0
 
 
+def _stat_host_file(
+    caller: wasmtime.Caller,
+    path_ptr: int,
+    path_len: int,
+    out_kind_ptr: int,
+    out_mtime_ptr: int,
+) -> int:
+    if path_len < 0:
+        return WASI_EINVAL
+
+    memory = _memory(caller)
+    kind = 0
+    mtime = 0.0
+    try:
+        path_bytes = memory.read(caller, path_ptr, path_ptr + path_len)
+        stat = Path(bytes(path_bytes).decode("utf-8")).stat()
+    except (OSError, UnicodeDecodeError, ValueError):
+        pass
+    else:
+        mode = stat.st_mode
+        kind = 2 if stat_module.S_ISDIR(mode) else 1 if stat_module.S_ISREG(mode) else 0
+        mtime = stat.st_mtime
+    _write_i32(memory, caller, out_kind_ptr, kind)
+    _write_f64(memory, caller, out_mtime_ptr, mtime)
+    return 0
+
+
 def _getcwd(caller: wasmtime.Caller, buf: int, size: int) -> int:
     cwd = b"/\0"
     if size == 0:
@@ -279,6 +310,10 @@ def _memory(caller: wasmtime.Caller) -> wasmtime.Memory:
 
 def _write_i32(memory: wasmtime.Memory, context: Any, ptr: int, value: int) -> None:
     memory.write(context, value.to_bytes(4, "little", signed=True), ptr)
+
+
+def _write_f64(memory: wasmtime.Memory, context: Any, ptr: int, value: float) -> None:
+    memory.write(context, struct.pack("<d", value), ptr)
 
 
 def _read_c_string(memory: wasmtime.Memory, context: Any, ptr: int) -> str:

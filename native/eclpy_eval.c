@@ -12,6 +12,17 @@ __attribute__((import_module("env"), import_name("eclpy_read_file")))
 extern int32_t eclpy_read_file(const char *path, int32_t path_len, char **out_data,
                                int32_t *out_len);
 
+/* Probe a host path: writes 0 (absent), 1 (file), or 2 (directory) to out_kind,
+ * and the modification time in Unix seconds to out_mtime. */
+#ifdef __wasm__
+__attribute__((import_module("env"), import_name("eclpy_stat")))
+#endif
+extern int32_t eclpy_stat(const char *path, int32_t path_len, int32_t *out_kind,
+                          double *out_mtime);
+
+/* Seconds between the Common Lisp universal-time epoch (1900) and the Unix epoch. */
+#define ECLPY_UNIX_TO_UNIVERSAL 2208988800LL
+
 static void eclpy_set_error(const char *message) {
     free(eclpy_error);
     if (message == NULL) {
@@ -88,6 +99,22 @@ static cl_object eclpy_native_load(cl_object source, cl_object verbose, cl_objec
     return ECL_T;
 }
 
+/* Returns (KIND . WRITE-DATE) for an existing host path, or NIL when absent.
+ * KIND is :FILE or :DIRECTORY; WRITE-DATE is a Common Lisp universal time. */
+static cl_object eclpy_host_stat(cl_object source) {
+    cl_object namestring = cl_namestring(source);
+    cl_object base = si_coerce_to_base_string(namestring);
+    const char *path = ecl_base_string_pointer_safe(base);
+    int32_t kind = 0;
+    double mtime = 0.0;
+
+    if (eclpy_stat(path, (int32_t)strlen(path), &kind, &mtime) != 0 || kind == 0) {
+        return ECL_NIL;
+    }
+    cl_object date = ecl_make_long_long((long long)mtime + ECLPY_UNIX_TO_UNIVERSAL);
+    return CONS(ecl_make_keyword(kind == 2 ? "DIRECTORY" : "FILE"), date);
+}
+
 void *eclpy_alloc(int32_t size) {
     if (size <= 0) {
         return NULL;
@@ -128,9 +155,12 @@ int32_t eclpy_init(void) {
         "(setf ext:*documentation-pool* "
         "(remove-if-not #'hash-table-p ext:*documentation-pool*))"));
     cl_eval(ecl_read_from_cstring(
-        "(defpackage #:ecl-python (:use #:cl) (:shadow #:load) (:export #:native-load))"));
+        "(defpackage #:ecl-python (:use #:cl) (:shadow #:load) "
+        "(:export #:native-load #:host-stat))"));
     ecl_def_c_function(ecl_read_from_cstring("ecl-python:native-load"),
                        (cl_objectfn_fixed)eclpy_native_load, 5);
+    ecl_def_c_function(ecl_read_from_cstring("ecl-python:host-stat"),
+                       (cl_objectfn_fixed)eclpy_host_stat, 1);
     eclpy_booted = 1;
     return 0;
 }
