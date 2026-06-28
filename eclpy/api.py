@@ -121,9 +121,6 @@ class Lisp:
         self._closed = False
         self._references: dict[int, LispReference] = {}
         self.session.eval(HELPER_SOURCE)
-        self._register_asdf()
-
-    def _register_asdf(self) -> None:
         form = SExp.list(
             SExp.atom("setf"),
             SExp.atom("ecl-python:*asdf-source*"),
@@ -208,12 +205,10 @@ def _attribute_candidates(attribute: str) -> list[str]:
     if attribute in _OPERATOR_NAMES:
         return [_OPERATOR_NAMES[attribute]]
 
-    candidates: list[str] = []
     base = _attribute_to_symbol_name(attribute)
-    candidates.append(base)
-    if not (base.startswith("*") and base.endswith("*")):
-        candidates.append(f"*{base}*")
-    return list(dict.fromkeys(candidates))
+    if base.startswith("*") and base.endswith("*"):
+        return [base]
+    return [base, f"*{base}*"]
 
 
 def _attribute_to_symbol_name(attribute: str) -> str:

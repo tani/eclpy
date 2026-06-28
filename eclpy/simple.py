@@ -92,7 +92,7 @@ def _expr(value: Any) -> SExp:
                     to_data_expr(items[0]),
                     *(_expr(item) for item in items[1:]),
                 )
-            if _looks_like_form_head(items[0]):
+            if isinstance(items[0], (str, Symbol, SExp)):
                 return SExp.list(*(_expr(item) for item in items))
             return SExp.quote(_literal_list(items))
         case _:
@@ -125,7 +125,3 @@ def _literal_list(items: tuple[Any, ...]) -> SExp:
     if not items:
         return SExp.atom("nil")
     return SExp.list(*(_literal_expr(item) for item in items))
-
-
-def _looks_like_form_head(value: Any) -> bool:
-    return isinstance(value, (str, Symbol, SExp))
