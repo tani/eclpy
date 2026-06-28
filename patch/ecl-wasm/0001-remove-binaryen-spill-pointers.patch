@@ -1,0 +1,15 @@
+--- a/src/configure
++++ b/src/configure
+@@ -6556,10 +6556,9 @@
+                 # Non-zero optimization levels seem to be slower in
+                 # combination with the binaryen spill-pointers pass.
+                 CFLAGS="${CFLAGS} -DECL_C_COMPATIBLE_VARIADIC_DISPATCH -O0"
+                 # The default stack size is 64KB, that's too little
+-                # for ECL. The spill-pointers pass is needed for the
+-                # gc to find pointers on the stack.
+-                LDFLAGS="${LDFLAGS} -sSTACK_SIZE=1048576 -sBINARYEN_EXTRA_PASSES=--spill-pointers"
++                # for ECL.
++                LDFLAGS="${LDFLAGS} -sSTACK_SIZE=1048576"
+                 ECL_MIN="ecl_min.html"
+                 EXEEXT=".html"
+                 enable_threads='no'

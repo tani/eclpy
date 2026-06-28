@@ -22,6 +22,7 @@ HOST_PREFIX = BUILD / "ecl-host"
 WASM_PREFIX = BUILD / "ecl-wasm"
 OUT_WASM = BUILD / "eclpy" / "ecl_eval.wasm"
 PACKAGE_WASM = ROOT / "eclpy" / "ecl_eval.wasm"
+ECL_WASM_PATCH_DIR = ROOT / "patch" / "ecl-wasm"
 
 ECL_LIBS = [
     ("libecl-help.a", False),
@@ -83,7 +84,7 @@ def build_wasm(host_ecl: Path, force: bool) -> Path:
         return WASM_PREFIX
 
     source = source_tree(WASM_SRC, fresh=True)
-    patch_configure(source)
+    apply_patch_dir(source, ECL_WASM_PATCH_DIR)
     shutil.rmtree(WASM_PREFIX, ignore_errors=True)
 
     env = os.environ.copy()
@@ -111,23 +112,11 @@ def build_wasm(host_ecl: Path, force: bool) -> Path:
     return WASM_PREFIX
 
 
-def patch_configure(source: Path) -> None:
-    configure = source / "src" / "configure"
-    replacements = (
-        (
-            'LDFLAGS="${LDFLAGS} -sSTACK_SIZE=1048576 '
-            '-sBINARYEN_EXTRA_PASSES=--spill-pointers"',
-            'LDFLAGS="${LDFLAGS} -sSTACK_SIZE=1048576"',
-        ),
-        (
-            'printf "%s\\n" "#define ECL_CAN_SET_STACK_SIZE /**/" >>confdefs.h',
-            ': "${ecl_cv_skip_stack_size_probe:=yes}"',
-        ),
-    )
-    text = configure.read_text()
-    for old, new in replacements:
-        text = text.replace(old, new)
-    configure.write_text(text)
+def apply_patch_dir(source: Path, patch_dir: Path) -> None:
+    if not patch_dir.is_dir():
+        raise SystemExit(f"missing ECL patch directory: {patch_dir}")
+    for patch in sorted(patch_dir.glob("*.patch")):
+        run("patch", "-p1", "-i", str(patch), cwd=source)
 
 
 def without_spill_pointers(flags: str) -> str:

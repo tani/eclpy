@@ -1,0 +1,11 @@
+--- a/src/configure
++++ b/src/configure
+@@ -9994,8 +9994,8 @@
+ if test "x$ac_cv_have_decl_RLIMIT_STACK" = xyes
+ then :
+ 
+-printf "%s\n" "#define ECL_CAN_SET_STACK_SIZE /**/" >>confdefs.h
++: "${ecl_cv_skip_stack_size_probe:=yes}"
+ 
+ fi
+ fi

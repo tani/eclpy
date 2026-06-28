@@ -273,7 +273,8 @@ Build the WASM Runtime
 
 The wheel includes ``eclpy/ecl_eval.wasm``, but that file must be generated before
 building a distribution. The ECL source is vendored in ``vendor/ecl-26.5.5``; no
-source tarball is required.
+source tarball is required. Local ECL build patches are kept under ``patch/`` and
+applied only to copied source trees under ``build/``.
 
 .. code-block:: sh
 
