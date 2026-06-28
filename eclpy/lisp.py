@@ -43,7 +43,7 @@ class Lisp:
     def eval(self, form: Any) -> Any:
         """Evaluate an explicit S-expression."""
         if not isinstance(form, SExp):
-            message = "Lisp.eval only accepts SExp; use eclpy.SExp.* or eclpy.simple.expr(...)"
+            message = "Lisp.eval only accepts SExp; use eclpy.SExp.* or eclpy.syntax.expr(...)"
             raise TypeError(message)
         return self._eval_sexp(form)
 

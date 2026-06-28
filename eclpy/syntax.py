@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from .encode import to_simple_expr, to_simple_literal
+from .encode import to_syntax_api_expr, to_syntax_api_literal
 from .objects import List
 from .sexp import SExp
 
@@ -23,8 +23,8 @@ __all__ = [
 
 
 def expr(value: Any) -> SExp:
-    """Convert one Python Simple API value into an S-expression."""
-    return to_simple_expr(value)
+    """Convert one Python Syntax API value into an S-expression."""
+    return to_syntax_api_expr(value)
 
 
 def string(value: str) -> SExp:
@@ -50,7 +50,8 @@ def array(items: Any) -> SExp:
     contents = tuple(items)
     shape = _array_shape(contents)
     if len(shape) <= 1:
-        return SExp.raw("#(" + " ".join(str(to_simple_literal(item)) for item in contents) + ")")
+        values = " ".join(str(to_syntax_api_literal(item)) for item in contents)
+        return SExp.raw(f"#({values})")
     return SExp.raw(f"#{len(shape)}A{_array_contents(contents)}")
 
 
@@ -60,13 +61,13 @@ def path(value: str | os.PathLike[str]) -> SExp:
 
 
 def quote(value: Any) -> SExp:
-    """Create a quoted expression from a Simple API literal."""
-    return SExp.quote(to_simple_literal(value))
+    """Create a quoted expression from a Syntax API literal."""
+    return SExp.quote(to_syntax_api_literal(value))
 
 
 def function(value: Any) -> SExp:
-    """Create a function quote from a Simple API expression."""
-    return SExp.function_quote(to_simple_expr(value))
+    """Create a function quote from a Syntax API expression."""
+    return SExp.function_quote(to_syntax_api_expr(value))
 
 
 def raw(source: str) -> SExp:
@@ -98,4 +99,4 @@ def _array_shape(value: Any) -> tuple[int, ...]:
 def _array_contents(value: Any) -> str:
     if _is_array_sequence(value):
         return "(" + " ".join(_array_contents(item) for item in tuple(value)) + ")"
-    return str(to_simple_literal(value))
+    return str(to_syntax_api_literal(value))

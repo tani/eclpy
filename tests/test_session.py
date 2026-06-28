@@ -8,9 +8,9 @@ import unittest
 from fractions import Fraction
 from pathlib import Path
 
-import eclpy.simple as L
+import eclpy.syntax as L
 from eclpy import Cons, EclError, EclSession, Lisp, List, Reference, SExp, Symbol
-from eclpy.api import ASDF_SOURCE
+from eclpy.lisp import ASDF_SOURCE
 from eclpy.proxy import find_package
 from eclpy.reader import parse_one
 
@@ -233,7 +233,7 @@ class LispApiTests(unittest.TestCase):
             with self.assertRaises(EclError):
                 lisp.eval(SExp.raw(f"(truename #p{SExp.string(str(missing))})"))
 
-    def test_simple_api_builds_shorthand_sexp(self) -> None:
+    def test_syntax_api_builds_shorthand_sexp(self) -> None:
         with Lisp(require_wasm()) as lisp:
             self.assertEqual(lisp.eval(L.expr(1)), 1)
             self.assertEqual(lisp.eval(L.expr(("+", 1, 1))), 2)

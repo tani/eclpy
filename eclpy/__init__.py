@@ -1,6 +1,6 @@
 """Python bindings for an ECL WebAssembly runtime."""
 
-from .api import Lisp
+from .lisp import Lisp
 from .objects import Cons, List, Reference, Symbol
 from .proxy import Package
 from .session import EclError, EclSession

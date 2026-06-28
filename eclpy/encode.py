@@ -32,8 +32,8 @@ def to_syntax_expr(value: Any) -> SExp:
             return to_data_expr(value)
 
 
-def to_simple_expr(value: Any) -> SExp:
-    """Convert a Python Simple API value into a Lisp expression."""
+def to_syntax_api_expr(value: Any) -> SExp:
+    """Convert a Python Syntax API value into a Lisp expression."""
     match value:
         case SExp() as sexp:
             return sexp
@@ -46,18 +46,18 @@ def to_simple_expr(value: Any) -> SExp:
             if not items:
                 return SExp.atom("nil")
             if isinstance(items[0], (str, Symbol, SExp)):
-                return SExp.list(*(to_simple_expr(item) for item in items))
-            return SExp.quote(to_simple_literal_list(items))
+                return SExp.list(*(to_syntax_api_expr(item) for item in items))
+            return SExp.quote(to_syntax_api_literal_list(items))
         case _:
             try:
                 return to_data_expr(value)
             except TypeError as exc:
-                message = f"cannot convert {type(value).__name__} to Lisp simple expression"
+                message = f"cannot convert {type(value).__name__} to Lisp syntax expression"
                 raise TypeError(message) from exc
 
 
-def to_simple_literal(value: Any) -> SExp:
-    """Convert a Python Simple API value into a literal Lisp expression."""
+def to_syntax_api_literal(value: Any) -> SExp:
+    """Convert a Python Syntax API value into a literal Lisp expression."""
     match value:
         case SExp() as sexp:
             return sexp
@@ -66,20 +66,20 @@ def to_simple_literal(value: Any) -> SExp:
         case str() as name:
             return SExp.symbol(name.upper())
         case (tuple() | list() | List()) as sequence:
-            return to_simple_literal_list(tuple(sequence))
+            return to_syntax_api_literal_list(tuple(sequence))
         case _:
             try:
                 return to_data_expr(value)
             except TypeError as exc:
-                message = f"cannot convert {type(value).__name__} to Lisp simple literal"
+                message = f"cannot convert {type(value).__name__} to Lisp syntax literal"
                 raise TypeError(message) from exc
 
 
-def to_simple_literal_list(items: tuple[Any, ...]) -> SExp:
+def to_syntax_api_literal_list(items: tuple[Any, ...]) -> SExp:
     """Convert Python sequence contents into a proper Lisp literal list."""
     if not items:
         return SExp.atom("nil")
-    return SExp.list(*(to_simple_literal(item) for item in items))
+    return SExp.list(*(to_syntax_api_literal(item) for item in items))
 
 
 def to_data_expr(value: Any) -> SExp:

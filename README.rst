@@ -7,7 +7,7 @@ packaged WebAssembly runtime.
 
 ``eclpy`` exposes a cl4py-inspired ``Lisp`` API for evaluating Lisp forms,
 calling functions, accessing packages, and converting common Lisp values to
-Python values. Normal users can start with ``eclpy.simple``; heavier users can
+Python values. Normal users can start with ``eclpy.syntax``; heavier users can
 drop down to explicit ``SExp`` trees or the raw ``EclSession`` bridge.
 
 .. contents::
@@ -32,14 +32,14 @@ not need a local ECL installation or an Emscripten toolchain.
 Quick Start
 -----------
 
-For everyday use, import ``eclpy.simple`` as a small expression builder:
+For everyday use, import ``eclpy.syntax`` as a small expression builder:
 
 .. code-block:: python
 
    from fractions import Fraction
 
    import eclpy
-   import eclpy.simple as L
+   import eclpy.syntax as L
 
    with eclpy.Lisp() as lisp:
        assert lisp.eval(L.expr(1)) == 1
@@ -61,7 +61,7 @@ Lisp symbol names in a cl4py-style way:
 .. code-block:: python
 
    import eclpy
-   import eclpy.simple as L
+   import eclpy.syntax as L
    from eclpy.proxy import find_package
 
    with eclpy.Lisp() as lisp:
@@ -85,7 +85,7 @@ proper Lisp lists, and ``Cons`` models dotted cons cells:
 .. code-block:: python
 
    import eclpy
-   import eclpy.simple as L
+   import eclpy.syntax as L
 
    with eclpy.Lisp() as lisp:
        assert lisp.eval(L.expr(("STRING=", L.string("foo"), L.string("foo")))) is True
@@ -117,9 +117,14 @@ Public API
 ``Reference`` is a scoped handle for Lisp objects that cannot be copied directly
 into Python.
 
-The modules are split by layer: ``eclpy.api`` owns the low-level ``Lisp`` API,
-``eclpy.simple`` builds Lisp syntax, and ``eclpy.proxy`` provides the Pythonic
-package proxy API.
+The modules are split by layer:
+
+.. code-block:: text
+
+   eclpy/session.py   # WASM/ECL runtime bridge
+   eclpy/lisp.py      # Lisp object/session facade
+   eclpy/syntax.py    # SExp/literal builders
+   eclpy/proxy.py     # Pythonic package proxy
 
 For Heavy Users
 ===============
@@ -177,7 +182,7 @@ Some Lisp values are returned as ``Reference`` handles. Scope them with
 .. code-block:: python
 
    import eclpy
-   import eclpy.simple as L
+   import eclpy.syntax as L
    from eclpy.proxy import find_package
 
    with eclpy.Lisp() as lisp:
@@ -229,7 +234,7 @@ ASDF; later ``require`` calls in the same Lisp session are no-ops:
 .. code-block:: python
 
    import eclpy
-   import eclpy.simple as L
+   import eclpy.syntax as L
    from eclpy.proxy import find_package
 
    with eclpy.Lisp() as lisp:
@@ -255,7 +260,7 @@ To load a local source project, create or point at a directory containing an
 .. code-block:: python
 
    import eclpy
-   import eclpy.simple as L
+   import eclpy.syntax as L
    from eclpy.proxy import find_package
 
    project = "/path/to/demo/"
@@ -364,8 +369,8 @@ Test
    uv run coverage run -m unittest discover -s tests
    uv run coverage report -m
 
-The tests cover raw low-level evaluation, strict ``SExp`` evaluation, Simple API
-shorthand evaluation, package/function lookup, macros and special forms,
+The tests cover raw low-level evaluation, strict ``SExp`` evaluation, Syntax API
+shorthand evaluation, package lookup, macros and special forms,
 cons/list conversion, higher-order Lisp functions, reference lifecycle, result
 parsing, ``(require 'asdf)`` module loading, missing runtime errors, Lisp-side
 exceptions, and internal runtime error paths. Coverage is configured to fail
@@ -407,8 +412,8 @@ The wheel should contain:
 .. code-block:: text
 
    eclpy/__init__.py
-   eclpy/api.py
-   eclpy/simple.py
+   eclpy/lisp.py
+   eclpy/syntax.py
    eclpy/proxy.py
    eclpy/decode.py
    eclpy/encode.py
@@ -426,7 +431,7 @@ You can smoke-test the built wheel outside the source tree:
 
    uv run --no-project --isolated \
      --with dist/eclpy-0.1.0-py3-none-any.whl \
-     python -c 'import eclpy; import eclpy.simple as L; print(eclpy.Lisp().eval(L.expr(("+", 10, 32))))'
+     python -c 'import eclpy; import eclpy.syntax as L; print(eclpy.Lisp().eval(L.expr(("+", 10, 32))))'
 
 Runtime Notes
 -------------

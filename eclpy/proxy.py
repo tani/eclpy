@@ -6,12 +6,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from .decode import decode_value, node_tag, optional_string, symbol_atom
-from .encode import to_simple_expr
+from .encode import to_syntax_api_expr
 from .objects import Symbol
 from .sexp import SExp
 
 if TYPE_CHECKING:
-    from .api import Lisp
+    from .lisp import Lisp
 
 _OPERATOR_NAMES = {
     "add": "+",
@@ -38,10 +38,10 @@ class _CallableSymbol:
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         parts = [SExp.symbol(self.name, self.package)]
-        parts.extend(to_simple_expr(arg) for arg in args)
+        parts.extend(to_syntax_api_expr(arg) for arg in args)
         for key, value in kwargs.items():
             parts.append(SExp.keyword(key))
-            parts.append(to_simple_expr(value))
+            parts.append(to_syntax_api_expr(value))
         return self.lisp._eval_sexp(SExp.list(*parts))
 
     def __repr__(self) -> str:

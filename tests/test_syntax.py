@@ -4,11 +4,11 @@ import unittest
 from fractions import Fraction
 from pathlib import Path
 
-import eclpy.simple as L
+import eclpy.syntax as L
 from eclpy import List, Package, SExp, Symbol
 
 
-class SimpleApiTests(unittest.TestCase):
+class SyntaxApiTests(unittest.TestCase):
     def test_helpers_render_explicit_sexp(self) -> None:
         self.assertEqual(str(L.string('a"b')), '"a\\"b"')
         self.assertEqual(str(L.symbol("car", "cl")), "CL::CAR")
@@ -58,9 +58,9 @@ class SimpleApiTests(unittest.TestCase):
         self.assertEqual(str(L.expr(List(1, 2))), "'(1 2)")
 
     def test_expr_rejects_unknown_values(self) -> None:
-        with self.assertRaisesRegex(TypeError, "simple expression"):
+        with self.assertRaisesRegex(TypeError, "syntax expression"):
             L.expr(object())
-        with self.assertRaisesRegex(TypeError, "simple literal"):
+        with self.assertRaisesRegex(TypeError, "syntax literal"):
             L.quote(object())
 
 
