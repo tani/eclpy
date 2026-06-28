@@ -337,5 +337,8 @@ path, so this package hosts the Preview 1 module directly.
 License
 =======
 
+Copyright (c) 2026 Masaya Taniguchi <masaya.taniguchi@tani.cc>.
+
 This project uses the same license terms as ECL: GNU LGPL 2.1 or later. See
-``LICENSE`` for ECL's copyright notice and ``COPYING`` for the LGPL 2.1 text.
+``LICENSE`` for eclpy and ECL copyright notices and ``COPYING`` for the LGPL
+2.1 text.
