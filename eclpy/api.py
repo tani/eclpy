@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
 
 from .decode import decode_result, decode_value, node_tag, optional_string, symbol_atom
-from .encode import keyword_parts, to_data_expr, to_syntax_expr
+from .encode import to_simple_expr
 from .objects import Reference, Symbol
 from .reader import parse_one
 from .runtime_lisp import HELPER_SOURCE
@@ -47,17 +47,12 @@ class Function:
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         """Call the Lisp operator and decode its primary return value."""
-        match self.kind:
-            case "macro" | "special":
-                parts = [self._operator()]
-                parts.extend(to_syntax_expr(arg) for arg in args)
-                parts.extend(keyword_parts(kwargs, values_as_expr=True))
-                return self.lisp._eval_sexp(SExp.list(*parts))
-            case _:
-                parts = [self._operator()]
-                parts.extend(to_data_expr(arg) for arg in args)
-                parts.extend(keyword_parts(kwargs, values_as_expr=False))
-                return self.lisp._eval_sexp(SExp.list(*parts))
+        parts = [self._operator()]
+        parts.extend(to_simple_expr(arg) for arg in args)
+        for key, value in kwargs.items():
+            parts.append(SExp.keyword(key))
+            parts.append(to_simple_expr(value))
+        return self.lisp._eval_sexp(SExp.list(*parts))
 
     def _operator(self) -> SExp:
         return SExp.symbol(self.name, self.package)

@@ -6,8 +6,8 @@ import os
 from typing import Any
 
 from .api import Function, Lisp, Package
-from .encode import to_data_expr
-from .objects import List, Symbol
+from .encode import to_simple_expr, to_simple_literal
+from .objects import List
 from .sexp import SExp
 
 __all__ = [
@@ -27,7 +27,7 @@ __all__ = [
 
 def expr(value: Any) -> SExp:
     """Convert one Python Simple API value into an S-expression."""
-    return _expr(value)
+    return to_simple_expr(value)
 
 
 def find_function(
@@ -68,7 +68,7 @@ def array(items: Any) -> SExp:
     contents = tuple(items)
     shape = _array_shape(contents)
     if len(shape) <= 1:
-        return SExp.raw("#(" + " ".join(str(_literal_expr(item)) for item in contents) + ")")
+        return SExp.raw("#(" + " ".join(str(to_simple_literal(item)) for item in contents) + ")")
     return SExp.raw(f"#{len(shape)}A{_array_contents(contents)}")
 
 
@@ -79,72 +79,19 @@ def path(value: str | os.PathLike[str]) -> SExp:
 
 def quote(value: Any) -> SExp:
     """Create a quoted expression from a Simple API literal."""
-    return SExp.quote(_literal_expr(value))
+    return SExp.quote(to_simple_literal(value))
 
 
 def function(value: Any) -> SExp:
     """Create a function quote from a Simple API expression."""
     if isinstance(value, Function):
-        return _expr(value)
-    return SExp.function_quote(_expr(value))
+        return to_simple_expr(value)
+    return SExp.function_quote(to_simple_expr(value))
 
 
 def raw(source: str) -> SExp:
     """Embed raw Lisp source as an S-expression node."""
     return SExp.raw(source)
-
-
-def _expr(value: Any) -> SExp:
-    match value:
-        case SExp() as sexp:
-            return sexp
-        case Symbol() as value_symbol:
-            return SExp.symbol(value_symbol.name, value_symbol.package)
-        case str() as name:
-            return symbol(name)
-        case (tuple() | list() | List()) as sequence:
-            items = tuple(sequence)
-            if not items:
-                return SExp.atom("nil")
-            if isinstance(items[0], Function):
-                return SExp.list(
-                    SExp.symbol("FUNCALL"),
-                    to_data_expr(items[0]),
-                    *(_expr(item) for item in items[1:]),
-                )
-            if isinstance(items[0], (str, Symbol, SExp)):
-                return SExp.list(*(_expr(item) for item in items))
-            return SExp.quote(_literal_list(items))
-        case _:
-            try:
-                return to_data_expr(value)
-            except TypeError as exc:
-                message = f"cannot convert {type(value).__name__} to Lisp simple expression"
-                raise TypeError(message) from exc
-
-
-def _literal_expr(value: Any) -> SExp:
-    match value:
-        case SExp() as sexp:
-            return sexp
-        case Symbol() as value_symbol:
-            return SExp.symbol(value_symbol.name, value_symbol.package)
-        case str() as name:
-            return symbol(name)
-        case (tuple() | list() | List()) as sequence:
-            return _literal_list(tuple(sequence))
-        case _:
-            try:
-                return to_data_expr(value)
-            except TypeError as exc:
-                message = f"cannot convert {type(value).__name__} to Lisp simple literal"
-                raise TypeError(message) from exc
-
-
-def _literal_list(items: tuple[Any, ...]) -> SExp:
-    if not items:
-        return SExp.atom("nil")
-    return SExp.list(*(_literal_expr(item) for item in items))
 
 
 def _is_array_sequence(value: Any) -> bool:
@@ -171,4 +118,4 @@ def _array_shape(value: Any) -> tuple[int, ...]:
 def _array_contents(value: Any) -> str:
     if _is_array_sequence(value):
         return "(" + " ".join(_array_contents(item) for item in tuple(value)) + ")"
-    return str(_literal_expr(value))
+    return str(to_simple_literal(value))

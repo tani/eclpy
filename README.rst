@@ -83,8 +83,12 @@ Lisp symbol names in a cl4py-style way:
        assert lisp.eval(L.expr(["package-name", cl])) == "COMMON-LISP"
        assert cl.oddp(5) is True
        assert cl.add(2, 3, 4, 5) == 14        # +
-       assert cl.stringgt("baz", "bar") == 2  # STRING>
+       assert cl.stringgt(L.string("baz"), L.string("bar")) == 2  # STRING>
        assert cl.print_base == 10             # *PRINT-BASE*
+
+Proxy function arguments use the same conversion rules as ``L.expr``. A Python
+string means a Lisp symbol, so use ``L.string("...")`` when you need a Lisp
+string value.
 
 Strings, Symbols, Lists
 -----------------------
@@ -258,20 +262,18 @@ To load a local source project, create or point at a directory containing an
 
 .. code-block:: python
 
-   from pathlib import Path
-
    import eclpy
    import eclpy.simple as L
 
-   project = Path("/path/to/demo")
+   project = "/path/to/demo/"
 
    with eclpy.Lisp() as lisp:
        lisp.eval(L.expr(("require", L.quote("asdf"))))
        asdf = L.find_package(lisp, "ASDF")
        cl = L.find_package(lisp, "CL")
 
-       cl.push(L.path(str(project) + "/"), L.symbol("*central-registry*", "ASDF"))
-       asdf.load_system("demo")
+       cl.push(L.path(project), "asdf:*central-registry*")
+       asdf.load_system(L.string("demo"))
 
        demo = L.find_package(lisp, "DEMO")
        assert demo.add(20, 22) == 42

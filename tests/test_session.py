@@ -209,16 +209,18 @@ class LispApiTests(unittest.TestCase):
 
             with Lisp(require_wasm()) as lisp:
                 lisp.eval(SExp.raw("(require 'asdf)"))
+                asdf = L.find_package(lisp, "ASDF")
+                cl = L.find_package(lisp, "CL")
                 # probe-file/file-write-date now see the real host file.
                 self.assertIs(
                     lisp.eval(SExp.raw(f"(and (probe-file #p{SExp.string(str(project))}/) t)")),
                     True,
                 )
-                lisp.eval(
-                    SExp.raw(f"(push #p{SExp.string(str(project) + '/')} asdf:*central-registry*)")
-                )
-                lisp.eval(SExp.raw('(asdf:load-system "demo")'))
-                self.assertEqual(lisp.eval(SExp.raw("(demo:add 20 22)")), 42)
+                project_dir = str(project) + "/"
+                cl.push(L.path(project_dir), "asdf:*central-registry*")
+                asdf.load_system(L.string("demo"))
+                demo = L.find_package(lisp, "DEMO")
+                self.assertEqual(demo.add(20, 22), 42)
 
     def test_truename_of_missing_host_file_errors(self) -> None:
         with tempfile.TemporaryDirectory() as directory, Lisp(require_wasm()) as lisp:
@@ -308,7 +310,7 @@ class LispApiTests(unittest.TestCase):
             self.assertIsInstance(string_value, str)
             self.assertIsInstance(symbol_value, Symbol)
             self.assertNotEqual(string_value, symbol_value)
-            self.assertEqual(L.find_function(lisp, "SYMBOL-NAME")(Symbol("FOO")), "FOO")
+            self.assertEqual(L.find_function(lisp, "SYMBOL-NAME")(L.quote(Symbol("FOO"))), "FOO")
 
     def test_lisp_symbol_lookup_and_functions(self) -> None:
         with Lisp(require_wasm()) as lisp:
@@ -329,10 +331,10 @@ class LispApiTests(unittest.TestCase):
             self.assertEqual(lisp.eval(L.expr(["package-name", cl])), "COMMON-LISP")
             self.assertIs(cl.oddp(5), True)
             self.assertEqual(cl.cons(5, None), List(5))
-            self.assertEqual(cl.remove(5, [1, -5, 2, 7, 5, 9], key=cl.abs), [1, 2, 7, 9])
+            self.assertEqual(cl.remove(5, [1, -5, 2, 7, 5, 9], key=cl.abs), List(1, 2, 7, 9))
             self.assertEqual(cl.add(2, 3, 4, 5), 14)
             self.assertIs(cl.gt(3, 2), True)
-            self.assertEqual(cl.stringgt("baz", "bar"), 2)
+            self.assertEqual(cl.stringgt(L.string("baz"), L.string("bar")), 2)
             self.assertEqual(cl.print_base, 10)
             self.assertGreater(cl.MOST_POSITIVE_DOUBLE_FLOAT, 1e300)
             self.assertEqual(cl.mapcar(cl.constantly(4), (1, 2, 3)), List(4, 4, 4))
