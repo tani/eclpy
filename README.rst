@@ -268,10 +268,9 @@ To load a local source project, create or point at a directory containing an
    with eclpy.Lisp() as lisp:
        lisp.eval(L.expr(("require", L.quote("asdf"))))
        asdf = L.find_package(lisp, "ASDF")
+       cl = L.find_package(lisp, "CL")
 
-       lisp.eval(
-           L.expr(("push", L.path(str(project) + "/"), L.symbol("*central-registry*", "ASDF")))
-       )
+       cl.push(L.path(str(project) + "/"), L.symbol("*central-registry*", "ASDF"))
        asdf.load_system("demo")
 
        demo = L.find_package(lisp, "DEMO")
