@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import unittest
 
-from eclpy import Cons, EclError, LispReference, List, Symbol
+from eclpy import Cons, EclError, List, Reference, Symbol
 
 
 class FakeLisp:
     def __init__(self) -> None:
-        self.released: list[LispReference] = []
+        self.released: list[Reference] = []
 
-    def _release_reference(self, reference: LispReference) -> None:
+    def _release_reference(self, reference: Reference) -> None:
         self.released.append(reference)
         reference.released = True
 
@@ -62,13 +62,13 @@ class ObjectTests(unittest.TestCase):
 
     def test_lisp_reference_lifecycle_and_repr(self) -> None:
         lisp = FakeLisp()
-        reference = LispReference(lisp, 10, "FUNCTION")
-        self.assertEqual(repr(reference), "LispReference(10, 'FUNCTION')")
+        reference = Reference(lisp, 10, "FUNCTION")
+        self.assertEqual(repr(reference), "Reference(10, 'FUNCTION')")
 
         reference.release()
         self.assertTrue(reference.released)
         self.assertEqual(lisp.released, [reference])
-        self.assertEqual(repr(reference), "LispReference(10, 'FUNCTION', released=True)")
+        self.assertEqual(repr(reference), "Reference(10, 'FUNCTION', released=True)")
 
         with self.assertRaisesRegex(EclError, "released Lisp reference"), reference:
             pass

@@ -117,7 +117,7 @@ class Cons:
 
 
 @dataclass
-class LispReference:
+class Reference:
     """A handle to a Lisp object that cannot be copied into Python."""
 
     lisp: Any
@@ -141,4 +141,4 @@ class LispReference:
 
     def __repr__(self) -> str:
         state = ", released=True" if self.released else ""
-        return f"LispReference({self.object_id}, {self.type_name!r}{state})"
+        return f"Reference({self.object_id}, {self.type_name!r}{state})"

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Self
 
 from .decode import decode_result, decode_value, node_tag, optional_string, symbol_atom
 from .encode import keyword_parts, to_data_expr, to_syntax_expr
-from .objects import LispReference, Symbol
+from .objects import Reference, Symbol
 from .reader import parse_one
 from .runtime_lisp import HELPER_SOURCE
 from .session import EclError, EclSession
@@ -119,7 +119,7 @@ class Lisp:
         self.session = session or EclSession(wasm_path)
         self._owns_session = session is None
         self._closed = False
-        self._references: dict[int, LispReference] = {}
+        self._references: dict[int, Reference] = {}
         self.session.eval(HELPER_SOURCE)
         form = SExp.list(
             SExp.atom("setf"),
@@ -171,12 +171,12 @@ class Lisp:
     def _find_package(self, name: str) -> Package:
         return Package(self, name.upper())
 
-    def _make_reference(self, object_id: int, type_name: str) -> LispReference:
-        reference = LispReference(self, object_id, type_name)
+    def _make_reference(self, object_id: int, type_name: str) -> Reference:
+        reference = Reference(self, object_id, type_name)
         self._references[object_id] = reference
         return reference
 
-    def _release_reference(self, reference: LispReference) -> None:
+    def _release_reference(self, reference: Reference) -> None:
         if reference.released:
             return
         self._references.pop(reference.object_id, None)

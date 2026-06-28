@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from fractions import Fraction
 
-from eclpy import Cons, EclError, LispReference, List, SExp, Symbol
+from eclpy import Cons, EclError, List, Reference, SExp, Symbol
 from eclpy.encode import keyword_parts, to_data_expr, to_syntax_expr
 
 
@@ -45,7 +45,7 @@ class EncodeTests(unittest.TestCase):
         self.assertEqual(str(to_data_expr(Function("+", "CL"))), "#'CL::+")
         self.assertEqual(str(to_data_expr(Package("CL"))), '(FIND-PACKAGE "CL")')
         self.assertEqual(
-            str(to_data_expr(LispReference(None, 7, "OBJECT"))), "(ecl-python:value 7)"
+            str(to_data_expr(Reference(None, 7, "OBJECT"))), "(ecl-python:value 7)"
         )
         self.assertEqual(str(to_data_expr(List())), "nil")
         self.assertEqual(str(to_data_expr(List(1, "x"))), '(LIST 1 "x")')
@@ -56,7 +56,7 @@ class EncodeTests(unittest.TestCase):
 
     def test_to_data_expr_rejects_invalid_values(self) -> None:
         with self.assertRaisesRegex(EclError, "released Lisp reference"):
-            to_data_expr(LispReference(None, 7, "OBJECT", released=True))
+            to_data_expr(Reference(None, 7, "OBJECT", released=True))
         with self.assertRaisesRegex(TypeError, "cannot convert object"):
             to_data_expr(object())
 

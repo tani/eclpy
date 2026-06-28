@@ -9,7 +9,7 @@ from fractions import Fraction
 from pathlib import Path
 
 import eclpy.simple as L
-from eclpy import Cons, EclError, EclSession, Lisp, LispReference, List, SExp, Symbol
+from eclpy import Cons, EclError, EclSession, Lisp, List, Reference, SExp, Symbol
 from eclpy.api import ASDF_SOURCE
 from eclpy.reader import parse_one
 
@@ -409,7 +409,7 @@ class LispApiTests(unittest.TestCase):
             cl = L.find_package(lisp, "CL")
             reference = cl.constantly(4)
 
-            self.assertIsInstance(reference, LispReference)
+            self.assertIsInstance(reference, Reference)
             with reference as fn:
                 self.assertEqual(cl.mapcar(fn, (1, 2, 3)), List(4, 4, 4))
 
@@ -422,7 +422,7 @@ class LispApiTests(unittest.TestCase):
         lisp = Lisp(require_wasm())
         reference = L.find_package(lisp, "CL").constantly(4)
 
-        self.assertIsInstance(reference, LispReference)
+        self.assertIsInstance(reference, Reference)
         self.assertFalse(reference.released)
 
         lisp.close()

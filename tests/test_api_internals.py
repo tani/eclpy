@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from eclpy import EclError, Lisp, LispReference, SExp, Symbol
+from eclpy import EclError, Lisp, Reference, SExp, Symbol
 from eclpy.api import Function, Package
 from eclpy.decode import decode_value
 
@@ -52,17 +52,17 @@ class ApiInternalsTests(unittest.TestCase):
     def test_release_reference_swallow_paths(self) -> None:
         lisp = Lisp(session=FakeSession())
 
-        already_released = LispReference(lisp, 1, "OBJECT", released=True)
+        already_released = Reference(lisp, 1, "OBJECT", released=True)
         lisp._release_reference(already_released)
         self.assertTrue(already_released.released)
 
-        reference = LispReference(lisp, 2, "OBJECT")
+        reference = Reference(lisp, 2, "OBJECT")
         lisp._references[2] = reference
         lisp._release_reference(reference)
         self.assertTrue(reference.released)
         self.assertNotIn(2, lisp._references)
 
-        another = LispReference(lisp, 3, "OBJECT")
+        another = Reference(lisp, 3, "OBJECT")
         lisp._references[3] = another
         lisp._release_all_references()
         self.assertTrue(another.released)

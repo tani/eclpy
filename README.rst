@@ -49,6 +49,29 @@ After the package is published to PyPI:
 The wheel is expected to include the ECL WebAssembly runtime, so normal users do
 not need a local ECL installation or an Emscripten toolchain.
 
+Public API
+==========
+
+``eclpy`` exports these public Python objects:
+
+.. code-block:: python
+
+   from eclpy import (
+       Cons,
+       EclError,
+       EclSession,
+       Function,
+       Lisp,
+       List,
+       Package,
+       Reference,
+       SExp,
+       Symbol,
+   )
+
+``Function`` and ``Package`` are the callable and package proxies returned by
+``eclpy.simple.find_function`` and ``eclpy.simple.find_package``.
+
 Use From Python
 ===============
 
@@ -286,8 +309,8 @@ Test
 .. code-block:: sh
 
    uv run basedpyright
-   uv run python -m unittest
-   uv run coverage run -m unittest
+   uv run python -m unittest discover -s tests
+   uv run coverage run -m unittest discover -s tests
    uv run coverage report -m
 
 The tests cover raw low-level evaluation, strict ``SExp`` evaluation, Simple API

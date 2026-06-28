@@ -5,7 +5,7 @@ from __future__ import annotations
 from fractions import Fraction
 from typing import Any
 
-from .objects import Cons, LispReference, List, Symbol
+from .objects import Cons, List, Reference, Symbol
 from .session import EclError
 from .sexp import SExp
 
@@ -55,7 +55,7 @@ def to_data_expr(value: Any) -> SExp:
             return SExp.function_quote(SExp.symbol(value.name, value.package))
         case _ if _is_package(value):
             return SExp.list(SExp.symbol("FIND-PACKAGE"), SExp.string(value.name))
-        case LispReference() as reference:
+        case Reference() as reference:
             if reference.released:
                 message = "cannot pass a released Lisp reference"
                 raise EclError(message)
