@@ -242,13 +242,14 @@ ASDF; later ``require`` calls in the same Lisp session are no-ops:
    import eclpy.simple as L
 
    with eclpy.Lisp() as lisp:
-       lisp.eval(L.expr(("require", L.quote("asdf"))))
+       cl = L.find_package(lisp, "CL")
+       cl.require(L.quote("asdf"))
 
        asdf = L.find_package(lisp, "ASDF")
        version = asdf.asdf_version()
        print(version)
 
-       assert lisp.eval(L.expr(("require", L.quote("asdf")))) == eclpy.List()
+       assert cl.require(L.quote("asdf")) == eclpy.List()
 
 ASDF is loaded from source with the ordinary ``load`` path, which is fast
 enough thanks to native WebAssembly exception handling.
@@ -268,11 +269,11 @@ To load a local source project, create or point at a directory containing an
    project = "/path/to/demo/"
 
    with eclpy.Lisp() as lisp:
-       lisp.eval(L.expr(("require", L.quote("asdf"))))
-       asdf = L.find_package(lisp, "ASDF")
        cl = L.find_package(lisp, "CL")
+       cl.require(L.quote("asdf"))
+       asdf = L.find_package(lisp, "ASDF")
 
-       cl.push(L.path(project), "asdf:*central-registry*")
+       cl.push(L.path(project), asdf.symbol("*central-registry*"))
        asdf.load_system(L.string("demo"))
 
        demo = L.find_package(lisp, "DEMO")
