@@ -178,13 +178,6 @@ def _export(exports: Any, name: str, expected_type: type[Any]) -> Any:
 
 
 def _define_emscripten_imports(linker: wasmtime.Linker, module: wasmtime.Module) -> None:
-    for name, func_type in _env_func_imports(module):
-        callback = _env_import(name, has_result=bool(list(func_type.results)))
-        linker.define_func("env", name, func_type, callback, access_caller=True)
-
-
-def _env_func_imports(module: wasmtime.Module) -> list[tuple[str, wasmtime.FuncType]]:
-    imports: list[tuple[str, wasmtime.FuncType]] = []
     seen: set[str] = set()
     for item in module.imports:
         name = item.name
@@ -195,8 +188,8 @@ def _env_func_imports(module: wasmtime.Module) -> list[tuple[str, wasmtime.FuncT
             and isinstance(item.type, wasmtime.FuncType)
         ):
             seen.add(name)
-            imports.append((name, item.type))
-    return imports
+            callback = _env_import(name, has_result=bool(list(item.type.results)))
+            linker.define_func("env", name, item.type, callback, access_caller=True)
 
 
 def _env_import(name: str, *, has_result: bool) -> Callable[..., Any]:
@@ -231,8 +224,8 @@ def _read_host_file(
         return WASI_EINVAL
 
     memory = _memory(caller)
-    malloc = _caller_func(caller, "malloc")
-    if malloc is None:
+    malloc = caller.get("malloc")
+    if not isinstance(malloc, wasmtime.Func):
         return WASI_ENOSYS
 
     try:
@@ -277,7 +270,7 @@ def _stat_host_file(
         kind = 2 if stat_module.S_ISDIR(mode) else 1 if stat_module.S_ISREG(mode) else 0
         mtime = stat.st_mtime
     _write_i32(memory, caller, out_kind_ptr, kind)
-    _write_f64(memory, caller, out_mtime_ptr, mtime)
+    memory.write(caller, struct.pack("<d", mtime), out_mtime_ptr)
     return 0
 
 
@@ -295,11 +288,6 @@ def _chdir(caller: wasmtime.Caller, path_ptr: int) -> int:
     return 0 if _read_c_string(_memory(caller), caller, path_ptr) in {".", "/"} else -WASI_ENOENT
 
 
-def _caller_func(caller: wasmtime.Caller, name: str) -> wasmtime.Func | None:
-    value = caller.get(name)
-    return value if isinstance(value, wasmtime.Func) else None
-
-
 def _memory(caller: wasmtime.Caller) -> wasmtime.Memory:
     value = caller.get("memory")
     if not isinstance(value, wasmtime.Memory):
@@ -310,10 +298,6 @@ def _memory(caller: wasmtime.Caller) -> wasmtime.Memory:
 
 def _write_i32(memory: wasmtime.Memory, context: Any, ptr: int, value: int) -> None:
     memory.write(context, value.to_bytes(4, "little", signed=True), ptr)
-
-
-def _write_f64(memory: wasmtime.Memory, context: Any, ptr: int, value: float) -> None:
-    memory.write(context, struct.pack("<d", value), ptr)
 
 
 def _read_c_string(memory: wasmtime.Memory, context: Any, ptr: int) -> str:

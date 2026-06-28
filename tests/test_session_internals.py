@@ -275,7 +275,7 @@ class SessionInternalsTests(unittest.TestCase):
         ):
             EclSession(wasm.name)
 
-    def test_env_func_imports_and_definitions(self) -> None:
+    def test_define_emscripten_imports(self) -> None:
         class FakeLinker:
             def __init__(self) -> None:
                 self.defined: list[tuple[str, str, object, object, bool]] = []
@@ -298,8 +298,6 @@ class SessionInternalsTests(unittest.TestCase):
         )()
         linker = FakeLinker()
         with patch.object(session.wasmtime, "FuncType", FakeFuncType):
-            imports = session._env_func_imports(module)
-            self.assertEqual([name for name, _type in imports], ["invoke_ii", "regular"])
             session._define_emscripten_imports(linker, module)
         self.assertEqual([item[1] for item in linker.defined], ["invoke_ii", "regular"])
 
@@ -332,10 +330,6 @@ class SessionInternalsTests(unittest.TestCase):
                 session._chdir(FakeCaller({"memory": FakeMemory(b"xbad\0")}), 1),
                 -session.WASI_ENOENT,
             )
-            self.assertIs(session._caller_func(FakeCaller({"fn": FakeFunc()}), "fn"), None)
-            with patch.object(session.wasmtime, "Func", FakeFunc):
-                func = FakeFunc()
-                self.assertIs(session._caller_func(FakeCaller({"fn": func}), "fn"), func)
             with self.assertRaisesRegex(EclError, "does not export memory"):
                 session._memory(FakeCaller())
 

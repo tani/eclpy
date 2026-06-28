@@ -175,19 +175,11 @@ char *eclpy_eval(const char *source, int32_t source_len) {
     }
 
     eclpy_set_error(NULL);
-    char *source_copy = (char *)malloc((size_t)source_len + 1);
-    if (source_copy == NULL) {
-        eclpy_set_error("failed to allocate Lisp source buffer");
-        return NULL;
-    }
-    memcpy(source_copy, source, (size_t)source_len);
-    source_copy[source_len] = '\0';
-
     char *output = NULL;
     cl_env_ptr env = ecl_process_env();
     ECL_CATCH_ALL_BEGIN(env) {
         int saw_form = 0;
-        cl_object result = eclpy_eval_forms(source_copy, source_len, ECL_NIL, &saw_form);
+        cl_object result = eclpy_eval_forms(source, source_len, ECL_NIL, &saw_form);
 
         if (!saw_form) {
             output = eclpy_strdup("");
@@ -204,7 +196,6 @@ char *eclpy_eval(const char *source, int32_t source_len) {
         output = NULL;
     } ECL_CATCH_ALL_END;
 
-    free(source_copy);
     return output;
 }
 

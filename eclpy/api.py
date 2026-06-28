@@ -168,9 +168,6 @@ class Lisp:
     def _eval_helper(self, sexp: SExp) -> Any:
         return parse_one(self.session.eval(str(sexp)))
 
-    def _decode(self, node: Any) -> Any:
-        return decode_value(node, self)
-
     def _find_function(self, name: str, package: str | None = None) -> LispFunction:
         return LispFunction(self, name.upper(), package.upper() if package is not None else None)
 

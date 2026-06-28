@@ -107,7 +107,7 @@ def build_wasm(host_ecl: Path, *, force: bool) -> Path:
     env["CC_FOR_BUILD"] = env.get("CC_FOR_BUILD") or shutil.which("cc") or "cc"
     env["CFLAGS"] = f"{env.get('CFLAGS') or '-O0'} {eh_flags}"
     env["CXXFLAGS"] = f"{env.get('CXXFLAGS') or '-O0'} {eh_flags}"
-    env["LDFLAGS"] = f"{without_spill_pointers(env.get('LDFLAGS', ''))} {eh_flags}".strip()
+    env["LDFLAGS"] = f"{env.get('LDFLAGS', '')} {eh_flags}".strip()
     env["EM_CACHE"] = str(BUILD / "emscripten-cache")
     Path(env["EM_CACHE"]).mkdir(parents=True, exist_ok=True)
 
@@ -135,12 +135,6 @@ def apply_patch_dir(source: Path, patch_dir: Path) -> None:
         raise SystemExit(message)
     for patch in sorted(patch_dir.glob("*.patch")):
         run("patch", "-p1", "-i", str(patch), cwd=source)
-
-
-def without_spill_pointers(flags: str) -> str:
-    return " ".join(
-        flag for flag in flags.split() if flag != "-sBINARYEN_EXTRA_PASSES=--spill-pointers"
-    )
 
 
 def link_wrapper() -> Path:

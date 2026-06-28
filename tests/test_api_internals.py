@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from eclpy import EclError, Lisp, LispReference, SExp, Symbol
 from eclpy.api import LispFunction, LispPackage
+from eclpy.decode import decode_value
 
 
 class FakeSession:
@@ -41,7 +42,7 @@ class ApiInternalsTests(unittest.TestCase):
 
     def test_lisp_close_decode_and_closed_eval(self) -> None:
         lisp = Lisp(session=FakeSession())
-        self.assertEqual(lisp._decode([":INT", 5]), 5)
+        self.assertEqual(decode_value([":INT", 5], lisp), 5)
 
         lisp.close()
         lisp.close()
