@@ -37,7 +37,7 @@ _OPERATOR_NAMES = {
 
 
 @dataclass(frozen=True)
-class LispFunction:
+class Function:
     """A callable proxy for a Lisp function, macro, or special operator."""
 
     lisp: Lisp
@@ -64,11 +64,11 @@ class LispFunction:
 
     def __repr__(self) -> str:
         package = f"{self.package}::" if self.package else ""
-        return f"LispFunction({package}{self.name})"
+        return f"Function({package}{self.name})"
 
 
 @dataclass(frozen=True)
-class LispPackage:
+class Package:
     """A Python view over a Common Lisp package."""
 
     lisp: Lisp
@@ -96,7 +96,7 @@ class LispPackage:
                     continue
                 case ":CALLABLE":
                     kind = symbol_atom(result[1]).lower().lstrip(":")
-                    return LispFunction(self.lisp, str(result[2]), optional_string(result[3]), kind)
+                    return Function(self.lisp, str(result[2]), optional_string(result[3]), kind)
                 case ":VALUE":
                     return decode_value(result[1], self.lisp)
                 case ":SYMBOL":
@@ -104,7 +104,7 @@ class LispPackage:
         raise AttributeError(attribute)
 
     def __repr__(self) -> str:
-        return f"LispPackage({self.name!r})"
+        return f"Package({self.name!r})"
 
 
 class Lisp:
@@ -165,11 +165,11 @@ class Lisp:
     def _eval_helper(self, sexp: SExp) -> Any:
         return parse_one(self.session.eval(str(sexp)))
 
-    def _find_function(self, name: str, package: str | None = None) -> LispFunction:
-        return LispFunction(self, name.upper(), package.upper() if package is not None else None)
+    def _find_function(self, name: str, package: str | None = None) -> Function:
+        return Function(self, name.upper(), package.upper() if package is not None else None)
 
-    def _find_package(self, name: str) -> LispPackage:
-        return LispPackage(self, name.upper())
+    def _find_package(self, name: str) -> Package:
+        return Package(self, name.upper())
 
     def _make_reference(self, object_id: int, type_name: str) -> LispReference:
         reference = LispReference(self, object_id, type_name)

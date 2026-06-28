@@ -51,9 +51,9 @@ def to_data_expr(value: Any) -> SExp:
             return SExp.string(string)
         case Symbol() as symbol:
             return SExp.quote(SExp.symbol(symbol.name, symbol.package))
-        case _ if _is_lisp_function(value):
+        case _ if _is_function(value):
             return SExp.function_quote(SExp.symbol(value.name, value.package))
-        case _ if _is_lisp_package(value):
+        case _ if _is_package(value):
             return SExp.list(SExp.symbol("FIND-PACKAGE"), SExp.string(value.name))
         case LispReference() as reference:
             if reference.released:
@@ -90,18 +90,18 @@ def keyword_parts(kwargs: dict[str, Any], *, values_as_expr: bool) -> list[SExp]
     return parts
 
 
-def _is_lisp_function(value: Any) -> bool:
+def _is_function(value: Any) -> bool:
     return (
-        value.__class__.__name__ == "LispFunction"
+        value.__class__.__name__ == "Function"
         and hasattr(value, "lisp")
         and hasattr(value, "name")
         and hasattr(value, "package")
     )
 
 
-def _is_lisp_package(value: Any) -> bool:
+def _is_package(value: Any) -> bool:
     return (
-        value.__class__.__name__ == "LispPackage"
+        value.__class__.__name__ == "Package"
         and hasattr(value, "lisp")
         and hasattr(value, "name")
     )

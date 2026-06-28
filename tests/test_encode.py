@@ -7,14 +7,14 @@ from eclpy import Cons, EclError, LispReference, List, SExp, Symbol
 from eclpy.encode import keyword_parts, to_data_expr, to_syntax_expr
 
 
-class LispFunction:
+class Function:
     def __init__(self, name: str, package: str | None = None) -> None:
         self.lisp = object()
         self.name = name
         self.package = package
 
 
-class LispPackage:
+class Package:
     def __init__(self, name: str) -> None:
         self.lisp = object()
         self.name = name
@@ -42,8 +42,8 @@ class EncodeTests(unittest.TestCase):
         self.assertEqual(str(to_data_expr(1.5)), "1.5")
         self.assertEqual(str(to_data_expr("foo")), '"foo"')
         self.assertEqual(str(to_data_expr(Symbol("FOO"))), "'FOO")
-        self.assertEqual(str(to_data_expr(LispFunction("+", "CL"))), "#'CL::+")
-        self.assertEqual(str(to_data_expr(LispPackage("CL"))), '(FIND-PACKAGE "CL")')
+        self.assertEqual(str(to_data_expr(Function("+", "CL"))), "#'CL::+")
+        self.assertEqual(str(to_data_expr(Package("CL"))), '(FIND-PACKAGE "CL")')
         self.assertEqual(
             str(to_data_expr(LispReference(None, 7, "OBJECT"))), "(ecl-python:value 7)"
         )

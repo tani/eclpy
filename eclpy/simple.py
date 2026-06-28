@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .api import Lisp, LispFunction, LispPackage
+from .api import Function, Lisp, Package
 from .encode import to_data_expr
 from .objects import List, Symbol
 from .sexp import SExp
@@ -30,14 +30,14 @@ def expr(value: Any) -> SExp:
 def find_function(
     lisp: Lisp,
     name: str,
-    package: str | LispPackage | None = None,
-) -> LispFunction:
+    package: str | Package | None = None,
+) -> Function:
     """Return a callable proxy for a Lisp function."""
-    package_name = package.name if isinstance(package, LispPackage) else package
+    package_name = package.name if isinstance(package, Package) else package
     return lisp._find_function(name, package_name)
 
 
-def find_package(lisp: Lisp, name: str) -> LispPackage:
+def find_package(lisp: Lisp, name: str) -> Package:
     """Return a Python view over a Common Lisp package."""
     return lisp._find_package(name)
 
@@ -64,7 +64,7 @@ def quote(value: Any) -> SExp:
 
 def function(value: Any) -> SExp:
     """Create a function quote from a Simple API expression."""
-    if isinstance(value, LispFunction):
+    if isinstance(value, Function):
         return _expr(value)
     return SExp.function_quote(_expr(value))
 
@@ -86,7 +86,7 @@ def _expr(value: Any) -> SExp:
             items = tuple(sequence)
             if not items:
                 return SExp.atom("nil")
-            if isinstance(items[0], LispFunction):
+            if isinstance(items[0], Function):
                 return SExp.list(
                     SExp.symbol("FUNCALL"),
                     to_data_expr(items[0]),

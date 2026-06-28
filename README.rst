@@ -176,7 +176,7 @@ Lisp references can be scoped with ``with``:
        with cl.constantly(4) as fn:
            assert cl.mapcar(fn, (1, 2, 3)) == eclpy.List(4, 4, 4)
 
-``LispPackage`` attributes follow cl4py-style name conversion:
+``Package`` attributes follow cl4py-style name conversion:
 
 .. code-block:: python
 

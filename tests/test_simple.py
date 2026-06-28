@@ -4,7 +4,7 @@ import unittest
 from fractions import Fraction
 
 import eclpy.simple as L
-from eclpy import LispFunction, LispPackage, List, SExp, Symbol
+from eclpy import Function, List, Package, SExp, Symbol
 
 
 class SimpleApiTests(unittest.TestCase):
@@ -22,7 +22,7 @@ class SimpleApiTests(unittest.TestCase):
         self.assertEqual(str(L.quote(1.25)), "'1.25")
         self.assertEqual(str(L.quote(())), "'nil")
         self.assertEqual(str(L.function("+")), "#'+")
-        self.assertEqual(str(L.function(LispFunction(object(), "+", "CL"))), "#'CL::+")
+        self.assertEqual(str(L.function(Function(object(), "+", "CL"))), "#'CL::+")
         self.assertEqual(str(L.raw("(+ 1 2)")), "(+ 1 2)")
 
     def test_expr_converts_supported_values(self) -> None:
@@ -41,12 +41,12 @@ class SimpleApiTests(unittest.TestCase):
         self.assertEqual(str(L.expr(("+", 1, 2))), "(+ 1 2)")
         self.assertEqual(str(L.expr([Symbol("+"), 1, 2])), "(+ 1 2)")
         self.assertEqual(str(L.expr((SExp.symbol("+"), 1, 2))), "(+ 1 2)")
-        self.assertEqual(str(L.expr(LispFunction(object(), "+", "CL"))), "#'CL::+")
+        self.assertEqual(str(L.expr(Function(object(), "+", "CL"))), "#'CL::+")
         self.assertEqual(
-            str(L.expr([LispFunction(object(), "+", "CL"), 1, 2])),
+            str(L.expr([Function(object(), "+", "CL"), 1, 2])),
             "(FUNCALL #'CL::+ 1 2)",
         )
-        self.assertEqual(str(L.expr(LispPackage(object(), "CL"))), '(FIND-PACKAGE "CL")')
+        self.assertEqual(str(L.expr(Package(object(), "CL"))), '(FIND-PACKAGE "CL")')
         self.assertEqual(str(L.expr((1, 2, 3))), "'(1 2 3)")
         self.assertEqual(str(L.expr(List(1, 2))), "'(1 2)")
 
