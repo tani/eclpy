@@ -26,6 +26,7 @@ artifacts = ["eclpy/ecl_eval.wasm"]
 [dependency-groups]
 dev = [
     "coverage>=7.14.3",
+    "ruff>=0.15.20",
 ]
 
 [tool.coverage.run]
@@ -34,3 +35,45 @@ source = ["eclpy"]
 [tool.coverage.report]
 fail_under = 100
 show_missing = true
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["vendor"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "ANN401",
+    "COM812",
+    "D203",
+    "D213",
+    "ISC001",
+    "D105",
+    "D107",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"eclpy/api.py" = ["SLF001"]
+"eclpy/decode.py" = ["C901", "PLR09", "SLF001"]
+"eclpy/encode.py" = ["C901", "PLR09"]
+"eclpy/objects.py" = ["SLF001"]
+"eclpy/simple.py" = ["C901", "PLR0911"]
+"scripts/**/*.py" = [
+    "D",
+    "S603",
+    "S607",
+    "T201",
+]
+"tests/**/*.py" = [
+    "ANN",
+    "ARG",
+    "D",
+    "EM",
+    "FBT003",
+    "N812",
+    "PLR2004",
+    "PT",
+    "SIM117",
+    "SLF001",
+    "TRY",
+]

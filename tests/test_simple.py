@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from fractions import Fraction
 import unittest
+from fractions import Fraction
 
 import eclpy.simple as L
 from eclpy import List, SExp, Symbol

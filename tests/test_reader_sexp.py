@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from fractions import Fraction
 import unittest
+from fractions import Fraction
 
 from eclpy import EclError, SExp
 from eclpy.reader import _unescape_lisp_string

@@ -1,5 +1,6 @@
-from __future__ import annotations
+"""Common Lisp helper source loaded into every high-level ECL session."""
 
+from __future__ import annotations
 
 HELPER_SOURCE = r"""
 (defpackage #:ecl-python

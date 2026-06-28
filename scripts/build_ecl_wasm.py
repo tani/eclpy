@@ -9,7 +9,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "build"
 ECL_DIR = "ecl-26.5.5"
@@ -64,7 +63,7 @@ def host_triplet() -> str:
     return f"{machine}-unknown-{system}"
 
 
-def build_host(force: bool) -> Path:
+def build_host(*, force: bool) -> Path:
     ecl = HOST_PREFIX / "bin" / "ecl"
     if ecl.exists() and not force:
         print(f"host ECL already exists: {ecl}")
@@ -78,7 +77,7 @@ def build_host(force: bool) -> Path:
     return ecl
 
 
-def build_wasm(host_ecl: Path, force: bool) -> Path:
+def build_wasm(host_ecl: Path, *, force: bool) -> Path:
     if find_library("libecl.a", required=False) and not force:
         print(f"wasm ECL already exists: {WASM_PREFIX}")
         return WASM_PREFIX
@@ -114,16 +113,15 @@ def build_wasm(host_ecl: Path, force: bool) -> Path:
 
 def apply_patch_dir(source: Path, patch_dir: Path) -> None:
     if not patch_dir.is_dir():
-        raise SystemExit(f"missing ECL patch directory: {patch_dir}")
+        message = f"missing ECL patch directory: {patch_dir}"
+        raise SystemExit(message)
     for patch in sorted(patch_dir.glob("*.patch")):
         run("patch", "-p1", "-i", str(patch), cwd=source)
 
 
 def without_spill_pointers(flags: str) -> str:
     return " ".join(
-        flag
-        for flag in flags.split()
-        if flag != "-sBINARYEN_EXTRA_PASSES=--spill-pointers"
+        flag for flag in flags.split() if flag != "-sBINARYEN_EXTRA_PASSES=--spill-pointers"
     )
 
 
@@ -164,7 +162,8 @@ def include_root() -> Path:
     for path in (WASM_PREFIX / "include", WASM_PREFIX):
         if (path / "ecl" / "ecl.h").is_file():
             return path
-    raise SystemExit(f"could not find ECL headers under {WASM_PREFIX}")
+    message = f"could not find ECL headers under {WASM_PREFIX}"
+    raise SystemExit(message)
 
 
 def find_library(name: str, *, required: bool) -> Path | None:
@@ -172,7 +171,8 @@ def find_library(name: str, *, required: bool) -> Path | None:
         if path.is_file():
             return path
     if required:
-        raise SystemExit(f"could not find {name} under {WASM_PREFIX}")
+        message = f"could not find {name} under {WASM_PREFIX}"
+        raise SystemExit(message)
     return None
 
 
@@ -210,11 +210,13 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     if not VENDORED_ECL.is_dir():
-        raise SystemExit(f"missing vendored ECL source: {VENDORED_ECL}")
+        message = f"missing vendored ECL source: {VENDORED_ECL}"
+        raise SystemExit(message)
     if not WRAPPER.is_file():
-        raise SystemExit(f"missing required file: {WRAPPER}")
+        message = f"missing required file: {WRAPPER}"
+        raise SystemExit(message)
 
-    build_wasm(build_host(args.force), force=args.force or args.force_wasm)
+    build_wasm(build_host(force=args.force), force=args.force or args.force_wasm)
     print(f"built {link_wrapper()}")
     package_wasm()
     if not args.skip_smoke:

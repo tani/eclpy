@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import tempfile
 import threading
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
-import eclpy.session as session
-from eclpy import EclError, EclSession
+from eclpy import EclError, EclSession, session
+
+
+def fake_engine() -> object:
+    return object()
 
 
 class FakeFunc:
@@ -72,7 +75,9 @@ class SessionInternalsTests(unittest.TestCase):
             with patch.dict(os.environ, {"ECL_WASM": str(path)}):
                 self.assertEqual(session._resolve_wasm_path(None), path.resolve())
             with patch.dict(os.environ, {}, clear=True):
-                self.assertIn(session._resolve_wasm_path(None), {session.PACKAGE_WASM, session.BUILD_WASM})
+                self.assertIn(
+                    session._resolve_wasm_path(None), {session.PACKAGE_WASM, session.BUILD_WASM}
+                )
 
     def test_export_and_zero_helpers(self) -> None:
         value = FakeFunc()
@@ -119,7 +124,9 @@ class SessionInternalsTests(unittest.TestCase):
             def inherit_stderr(self) -> None:
                 pass
 
-        fake_module = type("FakeModule", (), {"imports": [FakeImport("env", "missing", object())]})()
+        fake_module = type(
+            "FakeModule", (), {"imports": [FakeImport("env", "missing", object())]}
+        )()
 
         class FakeModuleClass:
             @staticmethod
@@ -136,16 +143,19 @@ class SessionInternalsTests(unittest.TestCase):
             def instantiate(self, store, module):
                 raise session.wasmtime.WasmtimeError("bad module")
 
-        with tempfile.NamedTemporaryFile() as wasm, patch.multiple(
-            session.wasmtime,
-            Engine=lambda: object(),
-            Store=lambda engine: FakeStore(),
-            WasiConfig=FakeWasiConfig,
-            Module=FakeModuleClass,
-            Linker=FakeLinker,
+        with (
+            tempfile.NamedTemporaryFile() as wasm,
+            patch.multiple(
+                session.wasmtime,
+                Engine=fake_engine,
+                Store=lambda engine: FakeStore(),
+                WasiConfig=FakeWasiConfig,
+                Module=FakeModuleClass,
+                Linker=FakeLinker,
+            ),
+            self.assertRaisesRegex(EclError, "Required imports: env.missing"),
         ):
-            with self.assertRaisesRegex(EclError, "Required imports: env.missing"):
-                EclSession(wasm.name)
+            EclSession(wasm.name)
 
     def test_init_reports_ecl_init_failure(self) -> None:
         class FakeStore:
@@ -182,18 +192,21 @@ class SessionInternalsTests(unittest.TestCase):
             def instantiate(self, store, module):
                 return FakeInstance()
 
-        with tempfile.NamedTemporaryFile() as wasm, patch.multiple(
-            session.wasmtime,
-            Engine=lambda: object(),
-            Store=lambda engine: FakeStore(),
-            WasiConfig=FakeWasiConfig,
-            Module=FakeModuleClass,
-            Linker=FakeLinker,
-            Memory=FakeMemory,
-            Func=FakeFunc,
+        with (
+            tempfile.NamedTemporaryFile() as wasm,
+            patch.multiple(
+                session.wasmtime,
+                Engine=fake_engine,
+                Store=lambda engine: FakeStore(),
+                WasiConfig=FakeWasiConfig,
+                Module=FakeModuleClass,
+                Linker=FakeLinker,
+                Memory=FakeMemory,
+                Func=FakeFunc,
+            ),
+            self.assertRaisesRegex(EclError, "failed to initialize ECL"),
         ):
-            with self.assertRaisesRegex(EclError, "failed to initialize ECL"):
-                EclSession(wasm.name)
+            EclSession(wasm.name)
 
     def test_env_func_imports_and_definitions(self) -> None:
         class FakeLinker:
@@ -231,18 +244,24 @@ class SessionInternalsTests(unittest.TestCase):
             with self.assertRaisesRegex(EclError, "missing table entry"):
                 callback(FakeCaller({"__indirect_function_table": FakeTable(object())}), 0)
 
-            caller = FakeCaller({"__indirect_function_table": FakeTable(FakeFunc(lambda caller, x: x + 1))})
+            caller = FakeCaller(
+                {"__indirect_function_table": FakeTable(FakeFunc(lambda caller, x: x + 1))}
+            )
             self.assertEqual(callback(caller, 0, 4), 5)
 
             no_result = session._invoke_import("invoke_v", FakeFuncType([]))
-            caller = FakeCaller({"__indirect_function_table": FakeTable(FakeFunc(lambda caller: 99))})
+            caller = FakeCaller(
+                {"__indirect_function_table": FakeTable(FakeFunc(lambda caller: 99))}
+            )
             self.assertIsNone(no_result(caller, 0))
 
             restore_stack = FakeFunc()
             set_threw = FakeFunc()
             longjmp_caller = FakeCaller(
                 {
-                    "__indirect_function_table": FakeTable(FakeFunc(lambda caller: (_ for _ in ()).throw(session._Longjmp()))),
+                    "__indirect_function_table": FakeTable(
+                        FakeFunc(lambda caller: (_ for _ in ()).throw(session._LongjmpError()))
+                    ),
                     "emscripten_stack_get_current": FakeFunc(lambda caller: 123),
                     "_emscripten_stack_restore": restore_stack,
                     "setThrew": set_threw,
@@ -253,10 +272,14 @@ class SessionInternalsTests(unittest.TestCase):
             self.assertEqual(set_threw.calls[-1], (longjmp_caller, 1, 0))
 
     def test_env_import_and_syscall_helpers(self) -> None:
-        self.assertIsNone(session._env_import("emscripten_notify_memory_growth", has_result=False)(FakeCaller()))
-        with self.assertRaises(session._Longjmp):
+        self.assertIsNone(
+            session._env_import("emscripten_notify_memory_growth", has_result=False)(FakeCaller())
+        )
+        with self.assertRaises(session._LongjmpError):
             session._env_import("_emscripten_throw_longjmp", has_result=False)(FakeCaller())
-        self.assertEqual(session._env_import("_emscripten_system", has_result=True)(FakeCaller()), -1)
+        self.assertEqual(
+            session._env_import("_emscripten_system", has_result=True)(FakeCaller()), -1
+        )
         self.assertEqual(
             session._env_import("unknown", has_result=True)(FakeCaller()),
             -session.WASI_ENOSYS,
@@ -275,7 +298,10 @@ class SessionInternalsTests(unittest.TestCase):
                 session._env_import("__syscall_chdir", has_result=True)(caller, 1),
                 0,
             )
-            self.assertEqual(session._chdir(FakeCaller({"memory": FakeMemory(b"xbad\0")}), 1), -session.WASI_ENOENT)
+            self.assertEqual(
+                session._chdir(FakeCaller({"memory": FakeMemory(b"xbad\0")}), 1),
+                -session.WASI_ENOENT,
+            )
             self.assertIs(session._caller_func(FakeCaller({"fn": FakeFunc()}), "fn"), None)
             with patch.object(session.wasmtime, "Func", FakeFunc):
                 func = FakeFunc()

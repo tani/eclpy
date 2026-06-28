@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-from fractions import Fraction
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from fractions import Fraction
+from pathlib import Path
 
 import eclpy.simple as L
 from eclpy import Cons, EclError, EclSession, Lisp, LispReference, List, SExp, Symbol
 from eclpy.reader import parse_one
-
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_WASM = ROOT / "eclpy" / "ecl_eval.wasm"
@@ -48,9 +47,8 @@ class EclSessionTests(unittest.TestCase):
             self.assertEqual(ecl.eval("(1+ *ecl-test-value*)"), "42")
 
     def test_eval_error_raises_ecl_error(self) -> None:
-        with EclSession(require_wasm()) as ecl:
-            with self.assertRaises(EclError):
-                ecl.eval("(definitely-not-a-bound-function)")
+        with EclSession(require_wasm()) as ecl, self.assertRaises(EclError):
+            ecl.eval("(definitely-not-a-bound-function)")
 
     def test_lisp_error_condition_raises_ecl_error(self) -> None:
         with EclSession(require_wasm()) as ecl:
@@ -161,17 +159,16 @@ class LispApiTests(unittest.TestCase):
 
         self.assertEqual(
             str(form),
-            '(+ 1 "two \\"words\\" \\\\ ok" :TEST-KEY COMMON-LISP::CAR '
-            '\'FOO #\'BAR (raw form))',
+            '(+ 1 "two \\"words\\" \\\\ ok" :TEST-KEY COMMON-LISP::CAR \'FOO #\'BAR (raw form))',
         )
         self.assertEqual(str(SExp.list()), "nil")
 
     def test_lark_reader_parses_tagged_results(self) -> None:
-        self.assertEqual(parse_one('(:OK (:INT 42))'), [":OK", [":INT", 42]])
+        self.assertEqual(parse_one("(:OK (:INT 42))"), [":OK", [":INT", 42]])
         self.assertEqual(parse_one('(:STRING "a\\"b\\\\c")'), [":STRING", 'a"b\\c'])
         self.assertEqual(parse_one('(:REF 7 "FUNCTION")'), [":REF", 7, "FUNCTION"])
         self.assertEqual(
-            parse_one('(:DOTTED-LIST ((:INT 1) (:INT 2)) (:INT 3))'),
+            parse_one("(:DOTTED-LIST ((:INT 1) (:INT 2)) (:INT 3))"),
             [
                 ":DOTTED-LIST",
                 [[":INT", 1], [":INT", 2]],
@@ -251,9 +248,7 @@ class LispApiTests(unittest.TestCase):
             cl = lisp.find_package("CL")
 
             self.assertEqual(
-                lisp.eval(
-                    SExp.list(SExp.symbol("CONS"), SExp.integer(1), SExp.integer(2))
-                ),
+                lisp.eval(SExp.list(SExp.symbol("CONS"), SExp.integer(1), SExp.integer(2))),
                 Cons(1, 2),
             )
 
@@ -284,9 +279,8 @@ class LispApiTests(unittest.TestCase):
             self.assertEqual(cl.mapcar(lisp.function("+"), (1, 2, 3, 4), twos), List(3, 4, 5, 6))
 
     def test_lisp_high_level_error_has_condition_details(self) -> None:
-        with Lisp(require_wasm()) as lisp:
-            with self.assertRaises(EclError) as raised:
-                lisp.eval(SExp.raw('(error "boom from Lisp")'))
+        with Lisp(require_wasm()) as lisp, self.assertRaises(EclError) as raised:
+            lisp.eval(SExp.raw('(error "boom from Lisp")'))
 
         self.assertIsNotNone(raised.exception.condition_type)
         self.assertIn("SIMPLE-ERROR", raised.exception.condition_type or "")

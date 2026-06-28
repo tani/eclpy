@@ -1,8 +1,10 @@
+"""High-level Python API for evaluating Common Lisp through ECL."""
+
 from __future__ import annotations
 
-import os
+from contextlib import suppress
 from dataclasses import dataclass
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
 
 from .decode import decode_result, decode_value, node_tag, optional_string, symbol_atom
 from .encode import keyword_parts, to_data_expr, to_syntax_expr
@@ -12,6 +14,8 @@ from .runtime_lisp import HELPER_SOURCE
 from .session import EclError, EclSession
 from .sexp import SExp
 
+if TYPE_CHECKING:
+    from os import PathLike
 
 _OPERATOR_NAMES = {
     "add": "+",
@@ -31,22 +35,26 @@ _OPERATOR_NAMES = {
 
 @dataclass(frozen=True)
 class LispFunction:
+    """A callable proxy for a Lisp function, macro, or special operator."""
+
     lisp: Lisp
     name: str
     package: str | None = None
     kind: str = "function"
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        if self.kind in {"macro", "special"}:
-            parts = [self._operator()]
-            parts.extend(to_syntax_expr(arg) for arg in args)
-            parts.extend(keyword_parts(kwargs, values_as_expr=True))
-            return self.lisp._eval_sexp(SExp.list(*parts))
-
-        parts = [self._operator()]
-        parts.extend(to_data_expr(arg) for arg in args)
-        parts.extend(keyword_parts(kwargs, values_as_expr=False))
-        return self.lisp._eval_sexp(SExp.list(*parts))
+        """Call the Lisp operator and decode its primary return value."""
+        match self.kind:
+            case "macro" | "special":
+                parts = [self._operator()]
+                parts.extend(to_syntax_expr(arg) for arg in args)
+                parts.extend(keyword_parts(kwargs, values_as_expr=True))
+                return self.lisp._eval_sexp(SExp.list(*parts))
+            case _:
+                parts = [self._operator()]
+                parts.extend(to_data_expr(arg) for arg in args)
+                parts.extend(keyword_parts(kwargs, values_as_expr=False))
+                return self.lisp._eval_sexp(SExp.list(*parts))
 
     def _operator(self) -> SExp:
         return SExp.symbol(self.name, self.package)
@@ -58,6 +66,8 @@ class LispFunction:
 
 @dataclass(frozen=True)
 class Package:
+    """A Python view over a Common Lisp package."""
+
     lisp: Lisp
     name: str
 
@@ -67,9 +77,11 @@ class Package:
         return self._lookup(name)
 
     def function(self, name: str) -> LispFunction:
+        """Return a callable proxy for a function in this package."""
         return LispFunction(self.lisp, name.upper(), self.name)
 
     def symbol(self, name: str) -> Symbol:
+        """Return a symbol interned in this package."""
         return Symbol(name.upper(), self.name)
 
     def _lookup(self, attribute: str) -> Any:
@@ -80,16 +92,16 @@ class Package:
                 SExp.string(symbol_name),
             )
             result = self.lisp._eval_helper(form)
-            tag = node_tag(result)
-            if tag == ":MISSING":
-                continue
-            if tag == ":CALLABLE":
-                kind = symbol_atom(result[1]).lower().lstrip(":")
-                return LispFunction(self.lisp, str(result[2]), optional_string(result[3]), kind)
-            if tag == ":VALUE":
-                return decode_value(result[1], self.lisp)
-            if tag == ":SYMBOL":
-                return Symbol(str(result[1]), optional_string(result[2]))
+            match node_tag(result):
+                case ":MISSING":
+                    continue
+                case ":CALLABLE":
+                    kind = symbol_atom(result[1]).lower().lstrip(":")
+                    return LispFunction(self.lisp, str(result[2]), optional_string(result[3]), kind)
+                case ":VALUE":
+                    return decode_value(result[1], self.lisp)
+                case ":SYMBOL":
+                    return Symbol(str(result[1]), optional_string(result[2]))
         raise AttributeError(attribute)
 
     def __repr__(self) -> str:
@@ -101,7 +113,7 @@ class Lisp:
 
     def __init__(
         self,
-        wasm_path: str | os.PathLike[str] | None = None,
+        wasm_path: str | PathLike[str] | None = None,
         *,
         session: EclSession | None = None,
     ) -> None:
@@ -113,18 +125,21 @@ class Lisp:
 
     def eval(self, form: Any) -> Any:
         """Evaluate an explicit S-expression."""
-
         if not isinstance(form, SExp):
-            raise TypeError("Lisp.eval only accepts SExp; use eclpy.SExp.* or eclpy.simple.expr(...)")
+            message = "Lisp.eval only accepts SExp; use eclpy.SExp.* or eclpy.simple.expr(...)"
+            raise TypeError(message)
         return self._eval_sexp(form)
 
     def function(self, name: str, package: str | None = None) -> LispFunction:
+        """Return a callable proxy for a Lisp function."""
         return LispFunction(self, name.upper(), package)
 
     def find_package(self, name: str) -> Package:
+        """Return a Python view over a Common Lisp package."""
         return Package(self, name.upper())
 
     def close(self) -> None:
+        """Release Lisp references and close the owned ECL session."""
         if self._closed:
             return
         self._release_all_references()
@@ -140,7 +155,8 @@ class Lisp:
 
     def _eval_sexp(self, sexp: SExp) -> Any:
         if self._closed:
-            raise EclError("Lisp session is closed")
+            message = "Lisp session is closed"
+            raise EclError(message)
         result = self._eval_helper(
             SExp.list(
                 SExp.atom("ecl-python:evaluate"),
@@ -165,7 +181,7 @@ class Lisp:
             return
         self._references.pop(reference.object_id, None)
         if not self._closed:
-            try:
+            with suppress(EclError):
                 self.session.eval(
                     str(
                         SExp.list(
@@ -174,16 +190,12 @@ class Lisp:
                         )
                     )
                 )
-            except EclError:
-                pass
         reference.released = True
 
     def _release_all_references(self) -> None:
         if self._references and not self._closed:
-            try:
+            with suppress(EclError):
                 self.session.eval(str(SExp.list(SExp.atom("ecl-python:release-all-objects"))))
-            except EclError:
-                pass
         for reference in self._references.values():
             reference.released = True
         self._references.clear()

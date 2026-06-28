@@ -1,14 +1,18 @@
+"""Low-level Wasmtime host for the ECL WebAssembly runtime."""
+
 from __future__ import annotations
 
 import os
 import threading
-from collections.abc import Callable
 from pathlib import Path
-from types import TracebackType
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any
 
 import wasmtime
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from types import TracebackType
+    from typing import Self
 
 PACKAGE_WASM = Path(__file__).with_name("ecl_eval.wasm")
 BUILD_WASM = Path(__file__).resolve().parents[1] / "build" / "eclpy" / "ecl_eval.wasm"
@@ -28,7 +32,7 @@ class EclError(RuntimeError):
         self.condition_type = condition_type
 
 
-class _Longjmp(Exception):
+class _LongjmpError(Exception):
     pass
 
 
@@ -38,11 +42,12 @@ class EclSession:
     def __init__(self, wasm_path: str | os.PathLike[str] | None = None) -> None:
         self.wasm_path = _resolve_wasm_path(wasm_path)
         if not self.wasm_path.is_file():
-            raise FileNotFoundError(
+            message = (
                 f"ECL WASM artifact not found at {self.wasm_path}. "
                 "Run `uv run python scripts/build_ecl_wasm.py` first, "
                 "pass wasm_path=..., or set ECL_WASM."
             )
+            raise FileNotFoundError(message)
 
         self._lock = threading.RLock()
         self._closed = False
@@ -63,7 +68,8 @@ class EclSession:
         except wasmtime.WasmtimeError as exc:
             imports = ", ".join(f"{item.module}.{item.name}" for item in module.imports)
             details = f" Required imports: {imports}." if imports else ""
-            raise EclError(f"failed to instantiate ECL WASM module.{details}") from exc
+            message = f"failed to instantiate ECL WASM module.{details}"
+            raise EclError(message) from exc
 
         exports = self._instance.exports(self._store)
         self._memory = _export(exports, "memory", wasmtime.Memory)
@@ -79,13 +85,14 @@ class EclSession:
             initialize(self._store)
 
         if self._call_i32(self._init) != 0:
-            raise EclError(self._read_last_error() or "failed to initialize ECL")
+            message = self._read_last_error() or "failed to initialize ECL"
+            raise EclError(message)
 
     def eval(self, code: str) -> str:
         """Evaluate Lisp source and return the printed last primary value."""
-
         if self._closed:
-            raise EclError("ECL session is closed")
+            message = "ECL session is closed"
+            raise EclError(message)
 
         data = code.encode("utf-8")
         if not data:
@@ -94,14 +101,16 @@ class EclSession:
         with self._lock:
             in_ptr = self._call_i32(self._alloc, len(data))
             if in_ptr == 0:
-                raise EclError("failed to allocate input buffer in WASM memory")
+                message = "failed to allocate input buffer in WASM memory"
+                raise EclError(message)
 
             out_ptr = 0
             try:
                 self._memory.write(self._store, data, in_ptr)
                 out_ptr = self._call_i32(self._eval, in_ptr, len(data))
                 if out_ptr == 0:
-                    raise EclError(self._read_last_error() or "ECL evaluation failed")
+                    message = self._read_last_error() or "ECL evaluation failed"
+                    raise EclError(message)
                 return _read_c_string(self._memory, self._store, out_ptr)
             finally:
                 self._free(self._store, in_ptr)
@@ -109,6 +118,7 @@ class EclSession:
                     self._free(self._store, out_ptr)
 
     def close(self) -> None:
+        """Shut down the ECL runtime if the session is still open."""
         if self._closed:
             return
         with self._lock:
@@ -130,7 +140,8 @@ class EclSession:
     def _call_i32(self, func: wasmtime.Func, *args: int) -> int:
         result = func(self._store, *args)
         if not isinstance(result, int):
-            raise EclError("ECL WASM function returned a non-integer pointer")
+            message = "ECL WASM function returned a non-integer pointer"
+            raise EclError(message)
         return result
 
     def _read_last_error(self) -> str:
@@ -148,7 +159,8 @@ def _resolve_wasm_path(wasm_path: str | os.PathLike[str] | None) -> Path:
 def _export(exports: Any, name: str, expected_type: type[Any]) -> Any:
     value = exports.get(name)
     if not isinstance(value, expected_type):
-        raise EclError(f"ECL WASM module does not export `{name}`")
+        message = f"ECL WASM module does not export `{name}`"
+        raise EclError(message)
     return value
 
 
@@ -166,7 +178,11 @@ def _env_func_imports(module: wasmtime.Module) -> list[tuple[str, wasmtime.FuncT
     imports: list[tuple[str, wasmtime.FuncType]] = []
     seen: set[str] = set()
     for item in module.imports:
-        if item.module == "env" and item.name not in seen and isinstance(item.type, wasmtime.FuncType):
+        if (
+            item.module == "env"
+            and item.name not in seen
+            and isinstance(item.type, wasmtime.FuncType)
+        ):
             seen.add(item.name)
             imports.append((item.name, item.type))
     return imports
@@ -179,17 +195,19 @@ def _invoke_import(name: str, func_type: wasmtime.FuncType) -> Callable[..., Any
     def invoke(caller: wasmtime.Caller, index: int, *args: int) -> Any:
         table = caller.get("__indirect_function_table")
         if not isinstance(table, wasmtime.Table):
-            raise EclError("Emscripten indirect function table is not exported")
+            message = "Emscripten indirect function table is not exported"
+            raise EclError(message)
         func = table.get(caller, index)
         if not isinstance(func, wasmtime.Func):
-            raise EclError(f"Emscripten invoke `{name}` missing table entry {index}")
+            message = f"Emscripten invoke `{name}` missing table entry {index}"
+            raise EclError(message)
 
         get_stack = _caller_func(caller, "emscripten_stack_get_current")
         restore_stack = _caller_func(caller, "_emscripten_stack_restore")
         stack_pointer = get_stack(caller) if get_stack else None
         try:
             result = func(caller, *args)
-        except _Longjmp:
+        except _LongjmpError:
             if stack_pointer is not None and restore_stack:
                 restore_stack(caller, stack_pointer)
             if set_threw := _caller_func(caller, "setThrew"):
@@ -203,17 +221,19 @@ def _invoke_import(name: str, func_type: wasmtime.FuncType) -> Callable[..., Any
 
 def _env_import(name: str, *, has_result: bool) -> Callable[..., Any]:
     def callback(caller: wasmtime.Caller, *args: int) -> Any:
-        if name == "emscripten_notify_memory_growth":
-            return None
-        if name == "_emscripten_throw_longjmp":
-            raise _Longjmp()
-        if name == "_emscripten_system":
-            return -1
-        if name == "__syscall_getcwd":
-            return _getcwd(caller, *args)
-        if name == "__syscall_chdir":
-            return _chdir(caller, *args)
-        return -WASI_ENOSYS if has_result else None
+        match name:
+            case "emscripten_notify_memory_growth":
+                return None
+            case "_emscripten_throw_longjmp":
+                raise _LongjmpError
+            case "_emscripten_system":
+                return -1
+            case "__syscall_getcwd":
+                return _getcwd(caller, *args)
+            case "__syscall_chdir":
+                return _chdir(caller, *args)
+            case _:
+                return -WASI_ENOSYS if has_result else None
 
     return callback
 
@@ -240,7 +260,8 @@ def _caller_func(caller: wasmtime.Caller, name: str) -> wasmtime.Func | None:
 def _memory(caller: wasmtime.Caller) -> wasmtime.Memory:
     value = caller.get("memory")
     if not isinstance(value, wasmtime.Memory):
-        raise EclError("ECL WASM module does not export memory")
+        message = "ECL WASM module does not export memory"
+        raise EclError(message)
     return value
 
 

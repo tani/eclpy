@@ -1,3 +1,5 @@
+"""Parse the helper's printed S-expression result format."""
+
 from __future__ import annotations
 
 import re
@@ -6,7 +8,6 @@ from typing import Any
 from lark import Lark, Transformer, UnexpectedInput, v_args
 
 from .session import EclError
-
 
 _INTEGER_RE = re.compile(r"^[+-]?\d+$")
 
@@ -29,10 +30,12 @@ _PARSER = Lark(_GRAMMAR, parser="lalr")
 
 
 def parse_one(source: str) -> Any:
+    """Parse one printed S-expression into Python atoms and lists."""
     try:
         return _TreeToPython().transform(_PARSER.parse(source))
     except UnexpectedInput as exc:
-        raise EclError(f"invalid ECL result syntax: {source!r}") from exc
+        message = f"invalid ECL result syntax: {source!r}"
+        raise EclError(message) from exc
 
 
 @v_args(inline=True)
@@ -62,7 +65,8 @@ def _unescape_lisp_string(source: str) -> str:
         index += 1
         if char == "\\":
             if index >= len(value):
-                raise EclError(f"invalid ECL string escape: {source!r}")
+                message = f"invalid ECL string escape: {source!r}"
+                raise EclError(message)
             chars.append(value[index])
             index += 1
         else:

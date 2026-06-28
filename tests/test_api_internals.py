@@ -13,9 +13,7 @@ class FakeSession:
 
     def eval(self, code: str) -> str:
         self.calls.append(code)
-        if code.startswith("(ecl-python:release-object") or code.startswith(
-            "(ecl-python:release-all-objects"
-        ):
+        if code.startswith(("(ecl-python:release-object", "(ecl-python:release-all-objects")):
             raise EclError("release failed")
         return "(:OK (:NIL))"
 

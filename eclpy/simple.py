@@ -1,3 +1,5 @@
+"""Fluent helpers for aggressively converting Python literals into Lisp syntax."""
+
 from __future__ import annotations
 
 from fractions import Fraction
@@ -19,81 +21,92 @@ __all__ = [
 
 def expr(value: Any) -> SExp:
     """Convert one Python Simple API value into an S-expression."""
-
     return _expr(value)
 
 
 def string(value: str) -> SExp:
+    """Create an escaped Lisp string literal."""
     return SExp.string(value)
 
 
 def symbol(name: str, package: str | None = None) -> SExp:
+    """Create a Lisp symbol, uppercasing the name and optional package."""
     return SExp.symbol(name.upper(), package.upper() if package is not None else None)
 
 
 def keyword(name: str) -> SExp:
+    """Create a Lisp keyword symbol."""
     return SExp.keyword(name)
 
 
 def quote(value: Any) -> SExp:
+    """Create a quoted expression from a Simple API literal."""
     return SExp.quote(_literal_expr(value))
 
 
 def function(value: Any) -> SExp:
+    """Create a function quote from a Simple API expression."""
     return SExp.function_quote(_expr(value))
 
 
 def raw(source: str) -> SExp:
+    """Embed raw Lisp source as an S-expression node."""
     return SExp.raw(source)
 
 
 def _expr(value: Any) -> SExp:
-    if isinstance(value, SExp):
-        return value
-    if isinstance(value, Symbol):
-        return SExp.symbol(value.name, value.package)
-    if isinstance(value, str):
-        return symbol(value)
-    if value is None or value is False:
-        return SExp.atom("nil")
-    if value is True:
-        return SExp.atom("t")
-    if isinstance(value, int) and not isinstance(value, bool):
-        return SExp.integer(value)
-    if isinstance(value, Fraction):
-        return SExp.ratio(value)
-    if isinstance(value, float):
-        return SExp.float(value)
-    if isinstance(value, (tuple, list, List)):
-        items = tuple(value)
-        if not items:
+    match value:
+        case SExp() as sexp:
+            return sexp
+        case Symbol() as value_symbol:
+            return SExp.symbol(value_symbol.name, value_symbol.package)
+        case str() as name:
+            return symbol(name)
+        case None | False:
             return SExp.atom("nil")
-        if _looks_like_form_head(items[0]):
-            return SExp.list(*(_expr(item) for item in items))
-        return SExp.quote(_literal_list(items))
-    raise TypeError(f"cannot convert {type(value).__name__} to Lisp simple expression")
+        case True:
+            return SExp.atom("t")
+        case int() as integer if not isinstance(value, bool):
+            return SExp.integer(integer)
+        case Fraction() as ratio:
+            return SExp.ratio(ratio)
+        case float() as number:
+            return SExp.float(number)
+        case (tuple() | list() | List()) as sequence:
+            items = tuple(sequence)
+            if not items:
+                return SExp.atom("nil")
+            if _looks_like_form_head(items[0]):
+                return SExp.list(*(_expr(item) for item in items))
+            return SExp.quote(_literal_list(items))
+        case _:
+            message = f"cannot convert {type(value).__name__} to Lisp simple expression"
+            raise TypeError(message)
 
 
 def _literal_expr(value: Any) -> SExp:
-    if isinstance(value, SExp):
-        return value
-    if isinstance(value, Symbol):
-        return SExp.symbol(value.name, value.package)
-    if isinstance(value, str):
-        return symbol(value)
-    if value is None or value is False:
-        return SExp.atom("nil")
-    if value is True:
-        return SExp.atom("t")
-    if isinstance(value, int) and not isinstance(value, bool):
-        return SExp.integer(value)
-    if isinstance(value, Fraction):
-        return SExp.ratio(value)
-    if isinstance(value, float):
-        return SExp.float(value)
-    if isinstance(value, (tuple, list, List)):
-        return _literal_list(tuple(value))
-    raise TypeError(f"cannot convert {type(value).__name__} to Lisp simple literal")
+    match value:
+        case SExp() as sexp:
+            return sexp
+        case Symbol() as value_symbol:
+            return SExp.symbol(value_symbol.name, value_symbol.package)
+        case str() as name:
+            return symbol(name)
+        case None | False:
+            return SExp.atom("nil")
+        case True:
+            return SExp.atom("t")
+        case int() as integer if not isinstance(value, bool):
+            return SExp.integer(integer)
+        case Fraction() as ratio:
+            return SExp.ratio(ratio)
+        case float() as number:
+            return SExp.float(number)
+        case (tuple() | list() | List()) as sequence:
+            return _literal_list(tuple(sequence))
+        case _:
+            message = f"cannot convert {type(value).__name__} to Lisp simple literal"
+            raise TypeError(message)
 
 
 def _literal_list(items: tuple[Any, ...]) -> SExp:

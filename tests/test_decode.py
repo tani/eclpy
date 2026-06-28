@@ -1,10 +1,17 @@
 from __future__ import annotations
 
-from fractions import Fraction
 import unittest
+from fractions import Fraction
 
 from eclpy import Cons, EclError, List, Symbol
-from eclpy.decode import decode_result, decode_value, expect_len, node_tag, optional_string, symbol_atom
+from eclpy.decode import (
+    decode_result,
+    decode_value,
+    expect_len,
+    node_tag,
+    optional_string,
+    symbol_atom,
+)
 
 
 class FakeLisp:
@@ -38,7 +45,9 @@ class DecodeTests(unittest.TestCase):
         self.assertEqual(decode_value([":RATIO", 6, 8], lisp), Fraction(3, 4))
         self.assertEqual(decode_value([":FLOAT", "1.25d0"], lisp), 1.25)
         self.assertEqual(decode_value([":STRING", "abc"], lisp), "abc")
-        self.assertEqual(decode_value([":SYMBOL", "CAR", "COMMON-LISP"], lisp), Symbol("CAR", "COMMON-LISP"))
+        self.assertEqual(
+            decode_value([":SYMBOL", "CAR", "COMMON-LISP"], lisp), Symbol("CAR", "COMMON-LISP")
+        )
         self.assertEqual(decode_value([":SYMBOL", "FOO", "NIL"], lisp), Symbol("FOO"))
         self.assertEqual(decode_value([":LIST", [":INT", 1], [":INT", 2]], lisp), List(1, 2))
         self.assertEqual(

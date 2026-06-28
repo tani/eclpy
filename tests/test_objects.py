@@ -70,9 +70,8 @@ class ObjectTests(unittest.TestCase):
         self.assertEqual(lisp.released, [reference])
         self.assertEqual(repr(reference), "LispReference(10, 'FUNCTION', released=True)")
 
-        with self.assertRaisesRegex(EclError, "released Lisp reference"):
-            with reference:
-                pass
+        with self.assertRaisesRegex(EclError, "released Lisp reference"), reference:
+            pass
 
 
 if __name__ == "__main__":

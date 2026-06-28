@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from fractions import Fraction
 import unittest
+from fractions import Fraction
 
 from eclpy import Cons, EclError, LispReference, List, SExp, Symbol
 from eclpy.encode import keyword_parts, to_data_expr, to_syntax_expr
@@ -37,7 +37,9 @@ class EncodeTests(unittest.TestCase):
         self.assertEqual(str(to_data_expr("foo")), '"foo"')
         self.assertEqual(str(to_data_expr(Symbol("FOO"))), "'FOO")
         self.assertEqual(str(to_data_expr(LispFunction("+", "CL"))), "#'CL::+")
-        self.assertEqual(str(to_data_expr(LispReference(None, 7, "OBJECT"))), "(ecl-python:value 7)")
+        self.assertEqual(
+            str(to_data_expr(LispReference(None, 7, "OBJECT"))), "(ecl-python:value 7)"
+        )
         self.assertEqual(str(to_data_expr(List())), "nil")
         self.assertEqual(str(to_data_expr(List(1, "x"))), '(LIST 1 "x")')
         self.assertEqual(str(to_data_expr(())), "nil")

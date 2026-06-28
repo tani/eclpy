@@ -1,3 +1,5 @@
+"""Encode Python values as explicit Lisp S-expression syntax."""
+
 from __future__ import annotations
 
 from fractions import Fraction
@@ -9,65 +11,76 @@ from .sexp import SExp
 
 
 def to_syntax_expr(value: Any) -> SExp:
-    if isinstance(value, SExp):
-        return value
-    if isinstance(value, tuple):
-        if not value:
-            return SExp.atom("nil")
-        if isinstance(value[0], str):
-            raise TypeError(
-                "Lisp form operators must be eclpy.Symbol instances; "
-                f"use Symbol({value[0]!r}) instead of {value[0]!r}"
-            )
-        return SExp.list(*(to_syntax_expr(item) for item in value))
-    if isinstance(value, Symbol):
-        return SExp.symbol(value.name, value.package)
-    return to_data_expr(value)
+    """Convert a Python value into syntax-level Lisp expression input."""
+    match value:
+        case SExp() as sexp:
+            return sexp
+        case tuple() as items:
+            if not items:
+                return SExp.atom("nil")
+            head = items[0]
+            if isinstance(head, str):
+                message = (
+                    "Lisp form operators must be eclpy.Symbol instances; "
+                    f"use Symbol({head!r}) instead of {head!r}"
+                )
+                raise TypeError(message)
+            return SExp.list(*(to_syntax_expr(item) for item in items))
+        case Symbol() as symbol:
+            return SExp.symbol(symbol.name, symbol.package)
+        case _:
+            return to_data_expr(value)
 
 
 def to_data_expr(value: Any) -> SExp:
-    if isinstance(value, SExp):
-        return value
-    if value is None or value is False:
-        return SExp.atom("nil")
-    if value is True:
-        return SExp.atom("t")
-    if isinstance(value, int) and not isinstance(value, bool):
-        return SExp.integer(value)
-    if isinstance(value, Fraction):
-        return SExp.ratio(value)
-    if isinstance(value, float):
-        return SExp.float(value)
-    if isinstance(value, str):
-        return SExp.string(value)
-    if isinstance(value, Symbol):
-        return SExp.quote(SExp.symbol(value.name, value.package))
-    if _is_lisp_function(value):
-        return SExp.function_quote(SExp.symbol(value.name, value.package))
-    if isinstance(value, LispReference):
-        if value.released:
-            raise EclError("cannot pass a released Lisp reference")
-        return SExp.list(SExp.atom("ecl-python:value"), SExp.integer(value.object_id))
-    if isinstance(value, List):
-        if not value:
+    """Convert a Python value into a Lisp expression that reconstructs data."""
+    match value:
+        case SExp() as sexp:
+            return sexp
+        case None | False:
             return SExp.atom("nil")
-        return SExp.list(SExp.symbol("LIST"), *(to_data_expr(item) for item in value))
-    if isinstance(value, tuple):
-        if not value:
-            return SExp.atom("nil")
-        return SExp.list(SExp.symbol("LIST"), *(to_data_expr(item) for item in value))
-    if isinstance(value, list):
-        return SExp.list(SExp.symbol("VECTOR"), *(to_data_expr(item) for item in value))
-    if isinstance(value, Cons):
-        return SExp.list(
-            SExp.symbol("CONS"),
-            to_data_expr(value.car),
-            to_data_expr(value.cdr),
-        )
-    raise TypeError(f"cannot convert {type(value).__name__} to Lisp")
+        case True:
+            return SExp.atom("t")
+        case int() as integer if not isinstance(value, bool):
+            return SExp.integer(integer)
+        case Fraction() as ratio:
+            return SExp.ratio(ratio)
+        case float() as number:
+            return SExp.float(number)
+        case str() as string:
+            return SExp.string(string)
+        case Symbol() as symbol:
+            return SExp.quote(SExp.symbol(symbol.name, symbol.package))
+        case _ if _is_lisp_function(value):
+            return SExp.function_quote(SExp.symbol(value.name, value.package))
+        case LispReference() as reference:
+            if reference.released:
+                message = "cannot pass a released Lisp reference"
+                raise EclError(message)
+            return SExp.list(SExp.atom("ecl-python:value"), SExp.integer(reference.object_id))
+        case List() as items:
+            if not items:
+                return SExp.atom("nil")
+            return SExp.list(SExp.symbol("LIST"), *(to_data_expr(item) for item in items))
+        case tuple() as items:
+            if not items:
+                return SExp.atom("nil")
+            return SExp.list(SExp.symbol("LIST"), *(to_data_expr(item) for item in items))
+        case list() as items:
+            return SExp.list(SExp.symbol("VECTOR"), *(to_data_expr(item) for item in items))
+        case Cons() as cons:
+            return SExp.list(
+                SExp.symbol("CONS"),
+                to_data_expr(cons.car),
+                to_data_expr(cons.cdr),
+            )
+        case _:
+            message = f"cannot convert {type(value).__name__} to Lisp"
+            raise TypeError(message)
 
 
 def keyword_parts(kwargs: dict[str, Any], *, values_as_expr: bool) -> list[SExp]:
+    """Encode Python keyword arguments as alternating Lisp keyword/value forms."""
     parts: list[SExp] = []
     for key, value in kwargs.items():
         parts.append(SExp.keyword(key))

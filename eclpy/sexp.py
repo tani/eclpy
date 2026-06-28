@@ -1,9 +1,13 @@
+"""Build Lisp S-expression syntax trees before string rendering."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass
-from fractions import Fraction
 import re
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from fractions import Fraction
 
 _SAFE_SYMBOL_RE = re.compile(r"^[A-Za-z0-9!$%&*+\-./:<=>?@^_~]+$")
 
@@ -13,10 +17,12 @@ class SExp:
 
     @staticmethod
     def atom(token: str) -> SExp:
+        """Create an unescaped atom from an already-valid Lisp token."""
         return _SAtom(token)
 
     @staticmethod
     def symbol(name: str, package: str | None = None) -> SExp:
+        """Create a Lisp symbol reference."""
         token = _symbol_token(name)
         if package is None:
             return _SAtom(token)
@@ -26,38 +32,47 @@ class SExp:
 
     @staticmethod
     def keyword(name: str) -> SExp:
+        """Create a Lisp keyword symbol."""
         return _SAtom(":" + _symbol_token(name.lstrip(":").replace("_", "-").upper()))
 
     @staticmethod
     def integer(value: int) -> SExp:
+        """Create an integer literal."""
         return _SAtom(str(value))
 
     @staticmethod
     def ratio(value: Fraction) -> SExp:
+        """Create a rational number literal."""
         return _SAtom(f"{value.numerator}/{value.denominator}")
 
     @staticmethod
     def float(value: float) -> SExp:
+        """Create a floating-point literal."""
         return _SAtom(repr(value))
 
     @staticmethod
     def string(value: str) -> SExp:
+        """Create an escaped Lisp string literal."""
         return _SString(value)
 
     @staticmethod
     def raw(source: str) -> SExp:
+        """Embed raw Lisp source as an S-expression node."""
         return _SRaw(source)
 
     @staticmethod
     def list(*items: SExp) -> SExp:
+        """Create a proper Lisp list expression."""
         return _SList(tuple(items))
 
     @staticmethod
     def quote(value: SExp) -> SExp:
+        """Create a quoted Lisp expression."""
         return _SQuote(value)
 
     @staticmethod
     def function_quote(value: SExp) -> SExp:
+        """Create a function-quoted Lisp expression."""
         return _SFunctionQuote(value)
 
     def __str__(self) -> str:
