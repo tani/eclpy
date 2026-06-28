@@ -16,7 +16,7 @@ def to_syntax_expr(value: Any) -> SExp:
             return SExp.atom("nil")
         if isinstance(value[0], str):
             raise TypeError(
-                "Lisp form operators must be ecl.Symbol instances; "
+                "Lisp form operators must be eclpy.Symbol instances; "
                 f"use Symbol({value[0]!r}) instead of {value[0]!r}"
             )
         return SExp.list(*(to_syntax_expr(item) for item in value))

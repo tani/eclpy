@@ -1,0 +1,69 @@
+from __future__ import annotations
+
+from fractions import Fraction
+import unittest
+
+from eclpy import Cons, EclError, LispReference, List, SExp, Symbol
+from eclpy.encode import keyword_parts, to_data_expr, to_syntax_expr
+
+
+class LispFunction:
+    def __init__(self, name: str, package: str | None = None) -> None:
+        self.lisp = object()
+        self.name = name
+        self.package = package
+
+
+class EncodeTests(unittest.TestCase):
+    def test_to_syntax_expr_converts_forms(self) -> None:
+        passthrough = SExp.integer(3)
+        self.assertIs(to_syntax_expr(passthrough), passthrough)
+        self.assertEqual(str(to_syntax_expr(())), "nil")
+        self.assertEqual(str(to_syntax_expr((Symbol("+"), 1, 2))), "(+ 1 2)")
+        self.assertEqual(str(to_syntax_expr(Symbol("CAR", "CL"))), "CL::CAR")
+        self.assertEqual(str(to_syntax_expr(9)), "9")
+        with self.assertRaisesRegex(TypeError, "operators must be eclpy.Symbol"):
+            to_syntax_expr(("+", 1, 2))
+
+    def test_to_data_expr_converts_python_values(self) -> None:
+        passthrough = SExp.string("x")
+        self.assertIs(to_data_expr(passthrough), passthrough)
+        self.assertEqual(str(to_data_expr(None)), "nil")
+        self.assertEqual(str(to_data_expr(False)), "nil")
+        self.assertEqual(str(to_data_expr(True)), "t")
+        self.assertEqual(str(to_data_expr(12)), "12")
+        self.assertEqual(str(to_data_expr(Fraction(5, 3))), "5/3")
+        self.assertEqual(str(to_data_expr(1.5)), "1.5")
+        self.assertEqual(str(to_data_expr("foo")), '"foo"')
+        self.assertEqual(str(to_data_expr(Symbol("FOO"))), "'FOO")
+        self.assertEqual(str(to_data_expr(LispFunction("+", "CL"))), "#'CL::+")
+        self.assertEqual(str(to_data_expr(LispReference(None, 7, "OBJECT"))), "(ecl-python:value 7)")
+        self.assertEqual(str(to_data_expr(List())), "nil")
+        self.assertEqual(str(to_data_expr(List(1, "x"))), '(LIST 1 "x")')
+        self.assertEqual(str(to_data_expr(())), "nil")
+        self.assertEqual(str(to_data_expr((1, 2))), "(LIST 1 2)")
+        self.assertEqual(str(to_data_expr([1, 2])), "(VECTOR 1 2)")
+        self.assertEqual(str(to_data_expr(Cons(1, 2))), "(CONS 1 2)")
+
+    def test_to_data_expr_rejects_invalid_values(self) -> None:
+        with self.assertRaisesRegex(EclError, "released Lisp reference"):
+            to_data_expr(LispReference(None, 7, "OBJECT", released=True))
+        with self.assertRaisesRegex(TypeError, "cannot convert object"):
+            to_data_expr(object())
+
+    def test_keyword_parts_converts_values_by_mode(self) -> None:
+        self.assertEqual(
+            " ".join(str(part) for part in keyword_parts({"key": "value"}, values_as_expr=False)),
+            ':KEY "value"',
+        )
+        self.assertEqual(
+            " ".join(
+                str(part)
+                for part in keyword_parts({"test_key": (Symbol("+"), 1, 2)}, values_as_expr=True)
+            ),
+            ":TEST-KEY (+ 1 2)",
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

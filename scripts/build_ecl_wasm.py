@@ -20,8 +20,8 @@ HOST_SRC = BUILD / "ecl-host-src"
 WASM_SRC = BUILD / "ecl-wasm-src"
 HOST_PREFIX = BUILD / "ecl-host"
 WASM_PREFIX = BUILD / "ecl-wasm"
-OUT_WASM = BUILD / "ecl" / "ecl_eval.wasm"
-PACKAGE_WASM = ROOT / "ecl" / "ecl_eval.wasm"
+OUT_WASM = BUILD / "eclpy" / "ecl_eval.wasm"
+PACKAGE_WASM = ROOT / "eclpy" / "ecl_eval.wasm"
 
 ECL_LIBS = [
     ("libecl-help.a", False),
@@ -189,7 +189,7 @@ def find_library(name: str, *, required: bool) -> Path | None:
 
 def smoke_test() -> None:
     code = (
-        "from ecl import EclSession\n"
+        "from eclpy import EclSession\n"
         "with EclSession() as ecl:\n"
         "    assert ecl.eval('(+ 1 2)') == '3'\n"
         "    ecl.eval('(defparameter *x* 41)')\n"
@@ -211,7 +211,7 @@ def smoke_test() -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build ECL as a WASM module for ecl.")
+    parser = argparse.ArgumentParser(description="Build ECL as a WASM module for eclpy.")
     parser.add_argument("--force", action="store_true", help="rebuild all ECL artifacts")
     parser.add_argument("--force-wasm", action="store_true", help="rebuild wasm ECL only")
     parser.add_argument("--skip-smoke", action="store_true", help="skip Python smoke test")

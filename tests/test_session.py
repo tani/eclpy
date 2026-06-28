@@ -8,14 +8,14 @@ import sys
 import tempfile
 import unittest
 
-import ecl.simple as L
-from ecl import Cons, EclError, EclSession, Lisp, LispReference, List, SExp, Symbol
-from ecl.reader import parse_one
+import eclpy.simple as L
+from eclpy import Cons, EclError, EclSession, Lisp, LispReference, List, SExp, Symbol
+from eclpy.reader import parse_one
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGE_WASM = ROOT / "ecl" / "ecl_eval.wasm"
-BUILD_WASM = ROOT / "build" / "ecl" / "ecl_eval.wasm"
+PACKAGE_WASM = ROOT / "eclpy" / "ecl_eval.wasm"
+BUILD_WASM = ROOT / "build" / "eclpy" / "ecl_eval.wasm"
 UNSUPPORTED_PRLIMIT64_WARNING = "unsupported syscall: __syscall_prlimit64"
 
 
@@ -65,9 +65,9 @@ class EclSessionTests(unittest.TestCase):
                 sys.executable,
                 "-c",
                 (
-                    "import ecl; lisp = ecl.Lisp(); "
-                    "print(lisp.eval(ecl.SExp.list(ecl.SExp.symbol('+'), "
-                    "ecl.SExp.integer(1), ecl.SExp.integer(2))))"
+                    "import eclpy; lisp = eclpy.Lisp(); "
+                    "print(lisp.eval(eclpy.SExp.list(eclpy.SExp.symbol('+'), "
+                    "eclpy.SExp.integer(1), eclpy.SExp.integer(2))))"
                 ),
             ],
             env=env,

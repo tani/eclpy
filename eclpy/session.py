@@ -11,7 +11,7 @@ import wasmtime
 
 
 PACKAGE_WASM = Path(__file__).with_name("ecl_eval.wasm")
-BUILD_WASM = Path(__file__).resolve().parents[1] / "build" / "ecl" / "ecl_eval.wasm"
+BUILD_WASM = Path(__file__).resolve().parents[1] / "build" / "eclpy" / "ecl_eval.wasm"
 
 WASI_EINVAL = 28
 WASI_ENOENT = 44
