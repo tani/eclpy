@@ -55,6 +55,10 @@ class EclSessionTests(unittest.TestCase):
             with self.assertRaisesRegex(EclError, "ECL evaluation escaped"):
                 ecl.eval('(error "boom from Lisp")')
 
+    def test_lisp_warning_does_not_raise_ecl_error(self) -> None:
+        with Lisp(require_wasm()) as lisp:
+            self.assertEqual(lisp.eval(SExp.raw('(progn (warn "careful") 7)')), 7)
+
     def test_startup_does_not_warn_about_prlimit64(self) -> None:
         env = os.environ.copy()
         env["ECL_WASM"] = str(require_wasm())
@@ -140,9 +144,10 @@ class LispApiTests(unittest.TestCase):
                 List(0, 1, 2, 3, 4),
             )
             self.assertEqual(
-                lisp.eval(L.expr(("mapcar", L.function("+"), (1, 2), (3, 4)))),
+                lisp.eval(L.expr(["mapcar", L.find_function(lisp, "+"), [1, 2], [3, 4]])),
                 List(4, 6),
             )
+            self.assertEqual(lisp.eval(L.expr([L.find_function(lisp, "+"), 1, 2])), 3)
             self.assertFalse(hasattr(L, "fn"))
 
     def test_sexp_stringification(self) -> None:
@@ -197,21 +202,25 @@ class LispApiTests(unittest.TestCase):
             self.assertIsInstance(string_value, str)
             self.assertIsInstance(symbol_value, Symbol)
             self.assertNotEqual(string_value, symbol_value)
-            self.assertEqual(lisp.function("SYMBOL-NAME")(Symbol("FOO")), "FOO")
+            self.assertEqual(L.find_function(lisp, "SYMBOL-NAME")(Symbol("FOO")), "FOO")
 
     def test_lisp_symbol_lookup_and_functions(self) -> None:
         with Lisp(require_wasm()) as lisp:
             self.assertEqual(lisp.eval(SExp.symbol("*PRINT-BASE*", "COMMON-LISP")), 10)
 
-            add = lisp.function("+")
-            div = lisp.function("/")
+            add = L.find_function(lisp, "+")
+            div = L.find_function(lisp, "/")
             self.assertEqual(add(1, 2, 3, 4), 10)
             self.assertEqual(div(2, 4), Fraction(1, 2))
+            self.assertEqual(L.find_function(lisp, "CAR", L.find_package(lisp, "CL"))((1, 2)), 1)
+            self.assertFalse(hasattr(lisp, "function"))
+            self.assertFalse(hasattr(lisp, "find_package"))
 
     def test_lisp_package_attribute_api(self) -> None:
         with Lisp(require_wasm()) as lisp:
-            cl = lisp.find_package("CL")
+            cl = L.find_package(lisp, "CL")
 
+            self.assertEqual(lisp.eval(L.expr(["package-name", cl])), "COMMON-LISP")
             self.assertIs(cl.oddp(5), True)
             self.assertEqual(cl.cons(5, None), List(5))
             self.assertEqual(cl.remove(5, [1, -5, 2, 7, 5, 9], key=cl.abs), [1, 2, 7, 9])
@@ -224,7 +233,7 @@ class LispApiTests(unittest.TestCase):
 
     def test_lisp_macro_and_special_form_wrappers(self) -> None:
         with Lisp(require_wasm()) as lisp:
-            cl = lisp.find_package("CL")
+            cl = L.find_package(lisp, "CL")
 
             self.assertEqual(
                 cl.loop(Symbol("REPEAT"), 5, Symbol("COLLECT"), 42),
@@ -245,7 +254,7 @@ class LispApiTests(unittest.TestCase):
 
     def test_lisp_cons_cells(self) -> None:
         with Lisp(require_wasm()) as lisp:
-            cl = lisp.find_package("CL")
+            cl = L.find_package(lisp, "CL")
 
             self.assertEqual(
                 lisp.eval(SExp.list(SExp.symbol("CONS"), SExp.integer(1), SExp.integer(2))),
@@ -276,7 +285,10 @@ class LispApiTests(unittest.TestCase):
                 Cons(1, Cons(2, 3)),
             )
             twos = Cons(2, Cons(2, Cons(2, Cons(2))))
-            self.assertEqual(cl.mapcar(lisp.function("+"), (1, 2, 3, 4), twos), List(3, 4, 5, 6))
+            self.assertEqual(
+                cl.mapcar(L.find_function(lisp, "+"), (1, 2, 3, 4), twos),
+                List(3, 4, 5, 6),
+            )
 
     def test_lisp_high_level_error_has_condition_details(self) -> None:
         with Lisp(require_wasm()) as lisp, self.assertRaises(EclError) as raised:
@@ -288,7 +300,7 @@ class LispApiTests(unittest.TestCase):
 
     def test_lisp_reference_context_manager(self) -> None:
         with Lisp(require_wasm()) as lisp:
-            cl = lisp.find_package("CL")
+            cl = L.find_package(lisp, "CL")
             reference = cl.constantly(4)
 
             self.assertIsInstance(reference, LispReference)
@@ -302,7 +314,7 @@ class LispApiTests(unittest.TestCase):
 
     def test_lisp_close_releases_outstanding_references(self) -> None:
         lisp = Lisp(require_wasm())
-        reference = lisp.find_package("CL").constantly(4)
+        reference = L.find_package(lisp, "CL").constantly(4)
 
         self.assertIsInstance(reference, LispReference)
         self.assertFalse(reference.released)

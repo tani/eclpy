@@ -10,6 +10,11 @@ if TYPE_CHECKING:
     from fractions import Fraction
 
 _SAFE_SYMBOL_RE = re.compile(r"^[A-Za-z0-9!$%&*+\-./:<=>?@^_~]+$")
+_INTEGER_TOKEN_RE = re.compile(r"^[+-]?\d+$")
+_RATIO_TOKEN_RE = re.compile(r"^[+-]?\d+/\d+$")
+_FLOAT_TOKEN_RE = re.compile(
+    r"^[+-]?((\d+\.\d*|\.\d+)([eEsSfFdDlL][+-]?\d+)?|\d+[eEsSfFdDlL][+-]?\d+)$"
+)
 
 
 class SExp:
@@ -130,9 +135,17 @@ class _SFunctionQuote(SExp):
 
 
 def _symbol_token(name: str) -> str:
-    if _SAFE_SYMBOL_RE.match(name):
+    if _SAFE_SYMBOL_RE.match(name) and not _looks_like_number(name):
         return name
     return "|" + name.replace("\\", "\\\\").replace("|", "\\|") + "|"
+
+
+def _looks_like_number(token: str) -> bool:
+    return (
+        bool(_INTEGER_TOKEN_RE.match(token))
+        or bool(_RATIO_TOKEN_RE.match(token))
+        or bool(_FLOAT_TOKEN_RE.match(token))
+    )
 
 
 def _string_literal(value: str) -> str:

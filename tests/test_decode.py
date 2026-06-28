@@ -18,7 +18,7 @@ class FakeLisp:
     def __init__(self) -> None:
         self.references: list[tuple[int, str]] = []
 
-    def find_package(self, name: str) -> str:
+    def _find_package(self, name: str) -> str:
         return f"package:{name}"
 
     def _make_reference(self, object_id: int, type_name: str) -> tuple[int, str]:

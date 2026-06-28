@@ -67,6 +67,17 @@ class FakeImport:
         self.type = type_
 
 
+class ClosingLock:
+    def __init__(self, ecl: EclSession) -> None:
+        self.ecl = ecl
+
+    def __enter__(self) -> None:
+        self.ecl._closed = True
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        pass
+
+
 class SessionInternalsTests(unittest.TestCase):
     def test_resolve_wasm_path(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -102,6 +113,11 @@ class SessionInternalsTests(unittest.TestCase):
         ecl._closed = False
         self.assertEqual(ecl.eval(""), "")
 
+        ecl._lock = ClosingLock(ecl)
+        with self.assertRaisesRegex(EclError, "closed"):
+            ecl.eval("x")
+
+        ecl._closed = False
         ecl._lock = threading.RLock()
         ecl._alloc = object()
         ecl._call_i32 = lambda func, *args: 0

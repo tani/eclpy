@@ -65,7 +65,7 @@ class LispFunction:
 
 
 @dataclass(frozen=True)
-class Package:
+class LispPackage:
     """A Python view over a Common Lisp package."""
 
     lisp: Lisp
@@ -75,10 +75,6 @@ class Package:
         if name.startswith("_"):
             raise AttributeError(name)
         return self._lookup(name)
-
-    def function(self, name: str) -> LispFunction:
-        """Return a callable proxy for a function in this package."""
-        return LispFunction(self.lisp, name.upper(), self.name)
 
     def symbol(self, name: str) -> Symbol:
         """Return a symbol interned in this package."""
@@ -105,7 +101,7 @@ class Package:
         raise AttributeError(attribute)
 
     def __repr__(self) -> str:
-        return f"Package({self.name!r})"
+        return f"LispPackage({self.name!r})"
 
 
 class Lisp:
@@ -129,14 +125,6 @@ class Lisp:
             message = "Lisp.eval only accepts SExp; use eclpy.SExp.* or eclpy.simple.expr(...)"
             raise TypeError(message)
         return self._eval_sexp(form)
-
-    def function(self, name: str, package: str | None = None) -> LispFunction:
-        """Return a callable proxy for a Lisp function."""
-        return LispFunction(self, name.upper(), package)
-
-    def find_package(self, name: str) -> Package:
-        """Return a Python view over a Common Lisp package."""
-        return Package(self, name.upper())
 
     def close(self) -> None:
         """Release Lisp references and close the owned ECL session."""
@@ -170,6 +158,12 @@ class Lisp:
 
     def _decode(self, node: Any) -> Any:
         return decode_value(node, self)
+
+    def _find_function(self, name: str, package: str | None = None) -> LispFunction:
+        return LispFunction(self, name.upper(), package.upper() if package is not None else None)
+
+    def _find_package(self, name: str) -> LispPackage:
+        return LispPackage(self, name.upper())
 
     def _make_reference(self, object_id: int, type_name: str) -> LispReference:
         reference = LispReference(self, object_id, type_name)

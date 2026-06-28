@@ -117,6 +117,10 @@ For shorthand syntax, use the separate Simple API layer:
        assert lisp.eval(
            L.expr(("loop", "for", "i", "below", 5, "collect", "i"))
        ) == eclpy.List(0, 1, 2, 3, 4)
+       assert lisp.eval(
+           L.expr(["mapcar", L.find_function(lisp, "+"), [1, 2], [3, 4]])
+       ) == eclpy.List(4, 6)
+       assert lisp.eval(L.expr([L.find_function(lisp, "+"), 1, 2])) == 3
 
 .. note::
 
@@ -147,12 +151,14 @@ You can look up functions and packages:
 .. code-block:: python
 
    import eclpy
+   import eclpy.simple as L
 
    with eclpy.Lisp() as lisp:
-       add = lisp.function("+")
+       add = L.find_function(lisp, "+")
        assert add(1, 2, 3, 4) == 10
 
-       cl = lisp.find_package("CL")
+       cl = L.find_package(lisp, "CL")
+       assert lisp.eval(L.expr(["package-name", cl])) == "COMMON-LISP"
        assert cl.oddp(5) is True
        assert cl.cons(5, None) == eclpy.List(5)
        assert cl.remove(5, [1, -5, 2, 7, 5, 9], key=cl.abs) == [1, 2, 7, 9]
@@ -163,18 +169,22 @@ Lisp references can be scoped with ``with``:
 .. code-block:: python
 
    import eclpy
+   import eclpy.simple as L
 
    with eclpy.Lisp() as lisp:
-       cl = lisp.find_package("CL")
+       cl = L.find_package(lisp, "CL")
        with cl.constantly(4) as fn:
            assert cl.mapcar(fn, (1, 2, 3)) == eclpy.List(4, 4, 4)
 
-Package attributes follow cl4py-style name conversion:
+``LispPackage`` attributes follow cl4py-style name conversion:
 
 .. code-block:: python
 
+   import eclpy
+   import eclpy.simple as L
+
    with eclpy.Lisp() as lisp:
-       cl = lisp.find_package("CL")
+       cl = L.find_package(lisp, "CL")
        assert cl.add(2, 3, 4, 5) == 14        # +
        assert cl.stringgt("baz", "bar") == 2  # STRING>
        assert cl.print_base == 10             # *PRINT-BASE*

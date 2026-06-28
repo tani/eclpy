@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 
 from eclpy import EclError, Lisp, LispReference, SExp, Symbol
-from eclpy.api import LispFunction, Package
+from eclpy.api import LispFunction, LispPackage
 
 
 class FakeSession:
@@ -24,21 +24,20 @@ class ApiInternalsTests(unittest.TestCase):
         self.assertEqual(repr(LispFunction(fake_lisp, "+")), "LispFunction(+)")
         self.assertEqual(repr(LispFunction(fake_lisp, "CAR", "CL")), "LispFunction(CL::CAR)")
 
-        package = Package(fake_lisp, "CL")
-        self.assertEqual(repr(package), "Package('CL')")
+        package = LispPackage(fake_lisp, "CL")
+        self.assertEqual(repr(package), "LispPackage('CL')")
         with self.assertRaises(AttributeError):
             package.__getattr__("_private")
-        self.assertEqual(package.function("car").name, "CAR")
-        self.assertEqual(package.function("car").package, "CL")
+        self.assertNotIn("function", type(package).__dict__)
         self.assertEqual(package.symbol("car"), Symbol("CAR", "CL"))
 
     def test_package_lookup_symbol_and_missing(self) -> None:
         fake_lisp = SimpleNamespace(_eval_helper=lambda form: [":SYMBOL", "FOO", "CL"])
-        self.assertEqual(Package(fake_lisp, "CL").foo, Symbol("FOO", "CL"))
+        self.assertEqual(LispPackage(fake_lisp, "CL").foo, Symbol("FOO", "CL"))
 
         missing_lisp = SimpleNamespace(_eval_helper=lambda form: [":MISSING"])
         with self.assertRaises(AttributeError):
-            _ = Package(missing_lisp, "CL").missing
+            _ = LispPackage(missing_lisp, "CL").missing
 
     def test_lisp_close_decode_and_closed_eval(self) -> None:
         lisp = Lisp(session=FakeSession())

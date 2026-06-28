@@ -14,6 +14,12 @@ class LispFunction:
         self.package = package
 
 
+class LispPackage:
+    def __init__(self, name: str) -> None:
+        self.lisp = object()
+        self.name = name
+
+
 class EncodeTests(unittest.TestCase):
     def test_to_syntax_expr_converts_forms(self) -> None:
         passthrough = SExp.integer(3)
@@ -37,6 +43,7 @@ class EncodeTests(unittest.TestCase):
         self.assertEqual(str(to_data_expr("foo")), '"foo"')
         self.assertEqual(str(to_data_expr(Symbol("FOO"))), "'FOO")
         self.assertEqual(str(to_data_expr(LispFunction("+", "CL"))), "#'CL::+")
+        self.assertEqual(str(to_data_expr(LispPackage("CL"))), '(FIND-PACKAGE "CL")')
         self.assertEqual(
             str(to_data_expr(LispReference(None, 7, "OBJECT"))), "(ecl-python:value 7)"
         )

@@ -42,7 +42,7 @@ HELPER_SOURCE = r"""
 (defun evaluate (thunk)
   (handler-case
       (list :ok (serialize (funcall thunk)))
-    (condition (condition)
+    (error (condition)
       (list :error
             (condition-type-name condition)
             (condition-message condition)))))

@@ -99,6 +99,10 @@ class EclSession:
             return ""
 
         with self._lock:
+            if self._closed:
+                message = "ECL session is closed"
+                raise EclError(message)
+
             in_ptr = self._call_i32(self._alloc, len(data))
             if in_ptr == 0:
                 message = "failed to allocate input buffer in WASM memory"

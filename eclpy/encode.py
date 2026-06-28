@@ -53,6 +53,8 @@ def to_data_expr(value: Any) -> SExp:
             return SExp.quote(SExp.symbol(symbol.name, symbol.package))
         case _ if _is_lisp_function(value):
             return SExp.function_quote(SExp.symbol(value.name, value.package))
+        case _ if _is_lisp_package(value):
+            return SExp.list(SExp.symbol("FIND-PACKAGE"), SExp.string(value.name))
         case LispReference() as reference:
             if reference.released:
                 message = "cannot pass a released Lisp reference"
@@ -94,4 +96,12 @@ def _is_lisp_function(value: Any) -> bool:
         and hasattr(value, "lisp")
         and hasattr(value, "name")
         and hasattr(value, "package")
+    )
+
+
+def _is_lisp_package(value: Any) -> bool:
+    return (
+        value.__class__.__name__ == "LispPackage"
+        and hasattr(value, "lisp")
+        and hasattr(value, "name")
     )

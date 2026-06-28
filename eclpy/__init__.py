@@ -1,6 +1,6 @@
 """Python bindings for an ECL WebAssembly runtime."""
 
-from .api import Lisp, LispFunction, Package
+from .api import Lisp, LispFunction, LispPackage
 from .objects import Cons, LispReference, List, Symbol
 from .session import EclError, EclSession
 from .sexp import SExp
@@ -11,9 +11,9 @@ __all__ = [
     "EclSession",
     "Lisp",
     "LispFunction",
+    "LispPackage",
     "LispReference",
     "List",
-    "Package",
     "SExp",
     "Symbol",
 ]
