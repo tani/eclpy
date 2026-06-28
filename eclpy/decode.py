@@ -72,7 +72,9 @@ def decode_value(node: Any, lisp: Any) -> Any:
             return [decode_value(item, lisp) for item in node[1:]]
         case ":PACKAGE":
             expect_len(node, 2)
-            return lisp._find_package(str(node[1]))
+            from .proxy import find_package
+
+            return find_package(lisp, str(node[1]))
         case ":REF":
             expect_len(node, 3)
             return lisp._make_reference(int(node[1]), str(node[2]))

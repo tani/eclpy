@@ -52,23 +52,8 @@ For everyday use, import ``eclpy.simple`` as a small expression builder:
 ``L.expr`` takes one Python value. Use ``L.expr(("+", 1, 1))``, not
 ``L.expr("+", 1, 1)``.
 
-Call Lisp Functions
--------------------
-
-``find_function`` returns a callable proxy for a Lisp function:
-
-.. code-block:: python
-
-   import eclpy
-   import eclpy.simple as L
-
-   with eclpy.Lisp() as lisp:
-       add = L.find_function(lisp, "+")
-       assert add(1, 2, 3, 4) == 10
-       assert lisp.eval(L.expr([add, 1, 2])) == 3
-
-Use Lisp Packages
------------------
+Use Pythonic Proxies
+--------------------
 
 ``find_package`` returns a package proxy. Attributes are converted to Common
 Lisp symbol names in a cl4py-style way:
@@ -77,9 +62,10 @@ Lisp symbol names in a cl4py-style way:
 
    import eclpy
    import eclpy.simple as L
+   from eclpy.proxy import find_package
 
    with eclpy.Lisp() as lisp:
-       cl = L.find_package(lisp, "CL")
+       cl = find_package(lisp, "CL")
        assert lisp.eval(L.expr(["package-name", cl])) == "COMMON-LISP"
        assert cl.oddp(5) is True
        assert cl.add(2, 3, 4, 5) == 14        # +
@@ -119,7 +105,6 @@ Public API
        Cons,
        EclError,
        EclSession,
-       Function,
        Lisp,
        List,
        Package,
@@ -128,9 +113,13 @@ Public API
        Symbol,
    )
 
-``Function`` and ``Package`` are the callable and package proxies returned by
-``eclpy.simple.find_function`` and ``eclpy.simple.find_package``. ``Reference``
-is a scoped handle for Lisp objects that cannot be copied directly into Python.
+``Package`` is the package proxy returned by ``eclpy.proxy.find_package``.
+``Reference`` is a scoped handle for Lisp objects that cannot be copied directly
+into Python.
+
+The modules are split by layer: ``eclpy.api`` owns the low-level ``Lisp`` API,
+``eclpy.simple`` builds Lisp syntax, and ``eclpy.proxy`` provides the Pythonic
+package proxy API.
 
 For Heavy Users
 ===============
@@ -189,9 +178,10 @@ Some Lisp values are returned as ``Reference`` handles. Scope them with
 
    import eclpy
    import eclpy.simple as L
+   from eclpy.proxy import find_package
 
    with eclpy.Lisp() as lisp:
-       cl = L.find_package(lisp, "CL")
+       cl = find_package(lisp, "CL")
        with cl.constantly(4) as fn:
            assert cl.mapcar(fn, (1, 2, 3)) == eclpy.List(4, 4, 4)
 
@@ -240,12 +230,13 @@ ASDF; later ``require`` calls in the same Lisp session are no-ops:
 
    import eclpy
    import eclpy.simple as L
+   from eclpy.proxy import find_package
 
    with eclpy.Lisp() as lisp:
-       cl = L.find_package(lisp, "CL")
+       cl = find_package(lisp, "CL")
        cl.require(L.quote("asdf"))
 
-       asdf = L.find_package(lisp, "ASDF")
+       asdf = find_package(lisp, "ASDF")
        version = asdf.asdf_version()
        print(version)
 
@@ -265,18 +256,19 @@ To load a local source project, create or point at a directory containing an
 
    import eclpy
    import eclpy.simple as L
+   from eclpy.proxy import find_package
 
    project = "/path/to/demo/"
 
    with eclpy.Lisp() as lisp:
-       cl = L.find_package(lisp, "CL")
+       cl = find_package(lisp, "CL")
        cl.require(L.quote("asdf"))
-       asdf = L.find_package(lisp, "ASDF")
+       asdf = find_package(lisp, "ASDF")
 
        cl.push(L.path(project), asdf.symbol("*central-registry*"))
        asdf.load_system(L.string("demo"))
 
-       demo = L.find_package(lisp, "DEMO")
+       demo = find_package(lisp, "DEMO")
        assert demo.add(20, 22) == 42
 
 For that example, the host directory could look like this:
@@ -416,6 +408,8 @@ The wheel should contain:
 
    eclpy/__init__.py
    eclpy/api.py
+   eclpy/simple.py
+   eclpy/proxy.py
    eclpy/decode.py
    eclpy/encode.py
    eclpy/session.py

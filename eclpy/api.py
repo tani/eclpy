@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 from contextlib import suppress
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
 
-from .decode import decode_result, decode_value, node_tag, optional_string, symbol_atom
-from .encode import to_simple_expr
-from .objects import Reference, Symbol
+from .decode import decode_result
+from .objects import Reference
 from .reader import parse_one
 from .runtime_lisp import HELPER_SOURCE
 from .session import EclError, EclSession
@@ -19,87 +17,6 @@ if TYPE_CHECKING:
     from os import PathLike
 
 ASDF_SOURCE = Path(__file__).with_name("asdf.lisp")
-
-_OPERATOR_NAMES = {
-    "add": "+",
-    "sub": "-",
-    "mul": "*",
-    "div": "/",
-    "inc": "1+",
-    "dec": "1-",
-    "gt": ">",
-    "lt": "<",
-    "ge": ">=",
-    "le": "<=",
-    "ne": "/=",
-    "sim": "=",
-}
-
-
-@dataclass(frozen=True)
-class Function:
-    """A callable proxy for a Lisp function, macro, or special operator."""
-
-    lisp: Lisp
-    name: str
-    package: str | None = None
-    kind: str = "function"
-
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        """Call the Lisp operator and decode its primary return value."""
-        parts = [self._operator()]
-        parts.extend(to_simple_expr(arg) for arg in args)
-        for key, value in kwargs.items():
-            parts.append(SExp.keyword(key))
-            parts.append(to_simple_expr(value))
-        return self.lisp._eval_sexp(SExp.list(*parts))
-
-    def _operator(self) -> SExp:
-        return SExp.symbol(self.name, self.package)
-
-    def __repr__(self) -> str:
-        package = f"{self.package}::" if self.package else ""
-        return f"Function({package}{self.name})"
-
-
-@dataclass(frozen=True)
-class Package:
-    """A Python view over a Common Lisp package."""
-
-    lisp: Lisp
-    name: str
-
-    def __getattr__(self, name: str) -> Any:
-        if name.startswith("_"):
-            raise AttributeError(name)
-        return self._lookup(name)
-
-    def symbol(self, name: str) -> Symbol:
-        """Return a symbol interned in this package."""
-        return Symbol(name.upper(), self.name)
-
-    def _lookup(self, attribute: str) -> Any:
-        for symbol_name in _attribute_candidates(attribute):
-            form = SExp.list(
-                SExp.atom("ecl-python:lookup-symbol"),
-                SExp.string(self.name),
-                SExp.string(symbol_name),
-            )
-            result = self.lisp._eval_helper(form)
-            match node_tag(result):
-                case ":MISSING":
-                    continue
-                case ":CALLABLE":
-                    kind = symbol_atom(result[1]).lower().lstrip(":")
-                    return Function(self.lisp, str(result[2]), optional_string(result[3]), kind)
-                case ":VALUE":
-                    return decode_value(result[1], self.lisp)
-                case ":SYMBOL":
-                    return Symbol(str(result[1]), optional_string(result[2]))
-        raise AttributeError(attribute)
-
-    def __repr__(self) -> str:
-        return f"Package({self.name!r})"
 
 
 class Lisp:
@@ -160,12 +77,6 @@ class Lisp:
     def _eval_helper(self, sexp: SExp) -> Any:
         return parse_one(self.session.eval(str(sexp)))
 
-    def _find_function(self, name: str, package: str | None = None) -> Function:
-        return Function(self, name.upper(), package.upper() if package is not None else None)
-
-    def _find_package(self, name: str) -> Package:
-        return Package(self, name.upper())
-
     def _make_reference(self, object_id: int, type_name: str) -> Reference:
         reference = Reference(self, object_id, type_name)
         self._references[object_id] = reference
@@ -194,31 +105,3 @@ class Lisp:
         for reference in self._references.values():
             reference.released = True
         self._references.clear()
-
-
-def _attribute_candidates(attribute: str) -> list[str]:
-    if attribute in _OPERATOR_NAMES:
-        return [_OPERATOR_NAMES[attribute]]
-
-    base = _attribute_to_symbol_name(attribute)
-    if base.startswith("*") and base.endswith("*"):
-        return [base]
-    return [base, f"*{base}*"]
-
-
-def _attribute_to_symbol_name(attribute: str) -> str:
-    lowered = attribute.lower()
-    suffixes = (
-        ("tilde", "~"),
-        ("ge", ">="),
-        ("le", "<="),
-        ("ne", "/="),
-        ("gt", ">"),
-        ("lt", "<"),
-        ("sim", "="),
-    )
-    for suffix, replacement in suffixes:
-        if lowered.endswith(suffix) and len(attribute) > len(suffix):
-            prefix = attribute[: -len(suffix)]
-            return prefix.replace("_", "-").upper() + replacement
-    return attribute.replace("_", "-").upper()

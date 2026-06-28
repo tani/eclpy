@@ -45,12 +45,6 @@ def to_simple_expr(value: Any) -> SExp:
             items = tuple(sequence)
             if not items:
                 return SExp.atom("nil")
-            if _is_function(items[0]):
-                return SExp.list(
-                    SExp.symbol("FUNCALL"),
-                    to_data_expr(items[0]),
-                    *(to_simple_expr(item) for item in items[1:]),
-                )
             if isinstance(items[0], (str, Symbol, SExp)):
                 return SExp.list(*(to_simple_expr(item) for item in items))
             return SExp.quote(to_simple_literal_list(items))
@@ -107,7 +101,7 @@ def to_data_expr(value: Any) -> SExp:
             return SExp.string(string)
         case Symbol() as symbol:
             return SExp.quote(SExp.symbol(symbol.name, symbol.package))
-        case _ if _is_function(value):
+        case _ if _is_callable_symbol(value):
             return SExp.function_quote(SExp.symbol(value.name, value.package))
         case _ if _is_package(value):
             return SExp.list(SExp.symbol("FIND-PACKAGE"), SExp.string(value.name))
@@ -146,10 +140,9 @@ def keyword_parts(kwargs: dict[str, Any], *, values_as_expr: bool) -> list[SExp]
     return parts
 
 
-def _is_function(value: Any) -> bool:
+def _is_callable_symbol(value: Any) -> bool:
     return (
-        value.__class__.__name__ == "Function"
-        and hasattr(value, "lisp")
+        value.__class__.__name__ == "_CallableSymbol"
         and hasattr(value, "name")
         and hasattr(value, "package")
     )

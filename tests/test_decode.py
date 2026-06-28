@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from fractions import Fraction
 
-from eclpy import Cons, EclError, List, Symbol
+from eclpy import Cons, EclError, List, Package, Symbol
 from eclpy.decode import (
     decode_result,
     decode_value,
@@ -17,9 +17,6 @@ from eclpy.decode import (
 class FakeLisp:
     def __init__(self) -> None:
         self.references: list[tuple[int, str]] = []
-
-    def _find_package(self, name: str) -> str:
-        return f"package:{name}"
 
     def _make_reference(self, object_id: int, type_name: str) -> tuple[int, str]:
         reference = (object_id, type_name)
@@ -55,7 +52,7 @@ class DecodeTests(unittest.TestCase):
             Cons(1, Cons(2, 3)),
         )
         self.assertEqual(decode_value([":VECTOR", [":INT", 1], [":INT", 2]], lisp), [1, 2])
-        self.assertEqual(decode_value([":PACKAGE", "CL"], lisp), "package:CL")
+        self.assertEqual(decode_value([":PACKAGE", "CL"], lisp), Package(lisp, "CL"))
         self.assertEqual(decode_value([":REF", 7, "FUNCTION"], lisp), (7, "FUNCTION"))
 
     def test_decode_rejects_malformed_values(self) -> None:

@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from .api import Function, Lisp, Package
 from .encode import to_simple_expr, to_simple_literal
 from .objects import List
 from .sexp import SExp
@@ -13,8 +12,6 @@ from .sexp import SExp
 __all__ = [
     "array",
     "expr",
-    "find_function",
-    "find_package",
     "function",
     "keyword",
     "path",
@@ -28,21 +25,6 @@ __all__ = [
 def expr(value: Any) -> SExp:
     """Convert one Python Simple API value into an S-expression."""
     return to_simple_expr(value)
-
-
-def find_function(
-    lisp: Lisp,
-    name: str,
-    package: str | Package | None = None,
-) -> Function:
-    """Return a callable proxy for a Lisp function."""
-    package_name = package.name if isinstance(package, Package) else package
-    return lisp._find_function(name, package_name)
-
-
-def find_package(lisp: Lisp, name: str) -> Package:
-    """Return a Python view over a Common Lisp package."""
-    return lisp._find_package(name)
 
 
 def string(value: str) -> SExp:
@@ -84,8 +66,6 @@ def quote(value: Any) -> SExp:
 
 def function(value: Any) -> SExp:
     """Create a function quote from a Simple API expression."""
-    if isinstance(value, Function):
-        return to_simple_expr(value)
     return SExp.function_quote(to_simple_expr(value))
 
 

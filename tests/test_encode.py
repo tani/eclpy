@@ -7,13 +7,6 @@ from eclpy import Cons, EclError, List, Reference, SExp, Symbol
 from eclpy.encode import keyword_parts, to_data_expr, to_syntax_expr
 
 
-class Function:
-    def __init__(self, name: str, package: str | None = None) -> None:
-        self.lisp = object()
-        self.name = name
-        self.package = package
-
-
 class Package:
     def __init__(self, name: str) -> None:
         self.lisp = object()
@@ -42,7 +35,6 @@ class EncodeTests(unittest.TestCase):
         self.assertEqual(str(to_data_expr(1.5)), "1.5")
         self.assertEqual(str(to_data_expr("foo")), '"foo"')
         self.assertEqual(str(to_data_expr(Symbol("FOO"))), "'FOO")
-        self.assertEqual(str(to_data_expr(Function("+", "CL"))), "#'CL::+")
         self.assertEqual(str(to_data_expr(Package("CL"))), '(FIND-PACKAGE "CL")')
         self.assertEqual(
             str(to_data_expr(Reference(None, 7, "OBJECT"))), "(ecl-python:value 7)"

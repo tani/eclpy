@@ -5,7 +5,7 @@ from fractions import Fraction
 from pathlib import Path
 
 import eclpy.simple as L
-from eclpy import Function, List, Package, SExp, Symbol
+from eclpy import List, Package, SExp, Symbol
 
 
 class SimpleApiTests(unittest.TestCase):
@@ -23,7 +23,6 @@ class SimpleApiTests(unittest.TestCase):
         self.assertEqual(str(L.quote(1.25)), "'1.25")
         self.assertEqual(str(L.quote(())), "'nil")
         self.assertEqual(str(L.function("+")), "#'+")
-        self.assertEqual(str(L.function(Function(object(), "+", "CL"))), "#'CL::+")
         self.assertEqual(str(L.array([1, "two", L.string("three")])), '#(1 TWO "three")')
         self.assertEqual(str(L.array([1, 2])), "#(1 2)")
         self.assertEqual(str(L.array((1, 2))), "#(1 2)")
@@ -54,11 +53,6 @@ class SimpleApiTests(unittest.TestCase):
         self.assertEqual(str(L.expr(("+", 1, 2))), "(+ 1 2)")
         self.assertEqual(str(L.expr([Symbol("+"), 1, 2])), "(+ 1 2)")
         self.assertEqual(str(L.expr((SExp.symbol("+"), 1, 2))), "(+ 1 2)")
-        self.assertEqual(str(L.expr(Function(object(), "+", "CL"))), "#'CL::+")
-        self.assertEqual(
-            str(L.expr([Function(object(), "+", "CL"), 1, 2])),
-            "(FUNCALL #'CL::+ 1 2)",
-        )
         self.assertEqual(str(L.expr(Package(object(), "CL"))), '(FIND-PACKAGE "CL")')
         self.assertEqual(str(L.expr((1, 2, 3))), "'(1 2 3)")
         self.assertEqual(str(L.expr(List(1, 2))), "'(1 2)")

@@ -11,6 +11,7 @@ from pathlib import Path
 import eclpy.simple as L
 from eclpy import Cons, EclError, EclSession, Lisp, List, Reference, SExp, Symbol
 from eclpy.api import ASDF_SOURCE
+from eclpy.proxy import find_package
 from eclpy.reader import parse_one
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -209,8 +210,8 @@ class LispApiTests(unittest.TestCase):
 
             with Lisp(require_wasm()) as lisp:
                 lisp.eval(SExp.raw("(require 'asdf)"))
-                asdf = L.find_package(lisp, "ASDF")
-                cl = L.find_package(lisp, "CL")
+                asdf = find_package(lisp, "ASDF")
+                cl = find_package(lisp, "CL")
                 # probe-file/file-write-date now see the real host file.
                 self.assertIs(
                     lisp.eval(SExp.raw(f"(and (probe-file #p{SExp.string(str(project))}/) t)")),
@@ -219,7 +220,7 @@ class LispApiTests(unittest.TestCase):
                 project_dir = str(project) + "/"
                 cl.push(L.path(project_dir), "asdf:*central-registry*")
                 asdf.load_system(L.string("demo"))
-                demo = L.find_package(lisp, "DEMO")
+                demo = find_package(lisp, "DEMO")
                 self.assertEqual(demo.add(20, 22), 42)
 
     def test_truename_of_missing_host_file_errors(self) -> None:
@@ -252,11 +253,13 @@ class LispApiTests(unittest.TestCase):
                 List(0, 1, 2, 3, 4),
             )
             self.assertEqual(
-                lisp.eval(L.expr(["mapcar", L.find_function(lisp, "+"), [1, 2], [3, 4]])),
+                lisp.eval(L.expr(["mapcar", L.function("+"), [1, 2], [3, 4]])),
                 List(4, 6),
             )
-            self.assertEqual(lisp.eval(L.expr([L.find_function(lisp, "+"), 1, 2])), 3)
+            self.assertEqual(lisp.eval(L.expr(("funcall", L.function("+"), 1, 2))), 3)
             self.assertFalse(hasattr(L, "fn"))
+            self.assertFalse(hasattr(L, "find_function"))
+            self.assertFalse(hasattr(L, "find_package"))
 
     def test_sexp_stringification(self) -> None:
         form = SExp.list(
@@ -310,23 +313,24 @@ class LispApiTests(unittest.TestCase):
             self.assertIsInstance(string_value, str)
             self.assertIsInstance(symbol_value, Symbol)
             self.assertNotEqual(string_value, symbol_value)
-            self.assertEqual(L.find_function(lisp, "SYMBOL-NAME")(L.quote(Symbol("FOO"))), "FOO")
+            self.assertEqual(find_package(lisp, "CL").symbol_name(L.quote(Symbol("FOO"))), "FOO")
 
     def test_lisp_symbol_lookup_and_functions(self) -> None:
         with Lisp(require_wasm()) as lisp:
             self.assertEqual(lisp.eval(SExp.symbol("*PRINT-BASE*", "COMMON-LISP")), 10)
 
-            add = L.find_function(lisp, "+")
-            div = L.find_function(lisp, "/")
+            cl = find_package(lisp, "CL")
+            add = cl.add
+            div = cl.div
             self.assertEqual(add(1, 2, 3, 4), 10)
             self.assertEqual(div(2, 4), Fraction(1, 2))
-            self.assertEqual(L.find_function(lisp, "CAR", L.find_package(lisp, "CL"))((1, 2)), 1)
+            self.assertEqual(cl.car((1, 2)), 1)
             self.assertFalse(hasattr(lisp, "function"))
             self.assertFalse(hasattr(lisp, "find_package"))
 
     def test_lisp_package_attribute_api(self) -> None:
         with Lisp(require_wasm()) as lisp:
-            cl = L.find_package(lisp, "CL")
+            cl = find_package(lisp, "CL")
 
             self.assertEqual(lisp.eval(L.expr(["package-name", cl])), "COMMON-LISP")
             self.assertIs(cl.oddp(5), True)
@@ -341,7 +345,7 @@ class LispApiTests(unittest.TestCase):
 
     def test_lisp_macro_and_special_form_wrappers(self) -> None:
         with Lisp(require_wasm()) as lisp:
-            cl = L.find_package(lisp, "CL")
+            cl = find_package(lisp, "CL")
 
             self.assertEqual(
                 cl.loop(Symbol("REPEAT"), 5, Symbol("COLLECT"), 42),
@@ -362,7 +366,7 @@ class LispApiTests(unittest.TestCase):
 
     def test_lisp_cons_cells(self) -> None:
         with Lisp(require_wasm()) as lisp:
-            cl = L.find_package(lisp, "CL")
+            cl = find_package(lisp, "CL")
 
             self.assertEqual(
                 lisp.eval(SExp.list(SExp.symbol("CONS"), SExp.integer(1), SExp.integer(2))),
@@ -394,7 +398,7 @@ class LispApiTests(unittest.TestCase):
             )
             twos = Cons(2, Cons(2, Cons(2, Cons(2))))
             self.assertEqual(
-                cl.mapcar(L.find_function(lisp, "+"), (1, 2, 3, 4), twos),
+                cl.mapcar(L.function("+"), (1, 2, 3, 4), twos),
                 List(3, 4, 5, 6),
             )
 
@@ -408,7 +412,7 @@ class LispApiTests(unittest.TestCase):
 
     def test_lisp_reference_context_manager(self) -> None:
         with Lisp(require_wasm()) as lisp:
-            cl = L.find_package(lisp, "CL")
+            cl = find_package(lisp, "CL")
             reference = cl.constantly(4)
 
             self.assertIsInstance(reference, Reference)
@@ -422,7 +426,7 @@ class LispApiTests(unittest.TestCase):
 
     def test_lisp_close_releases_outstanding_references(self) -> None:
         lisp = Lisp(require_wasm())
-        reference = L.find_package(lisp, "CL").constantly(4)
+        reference = find_package(lisp, "CL").constantly(4)
 
         self.assertIsInstance(reference, Reference)
         self.assertFalse(reference.released)
