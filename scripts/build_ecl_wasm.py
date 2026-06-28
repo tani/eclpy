@@ -92,6 +92,8 @@ def build_wasm(host_ecl: Path, *, force: bool) -> Path:
     env["CFLAGS"] = env.get("CFLAGS") or "-O0"
     env["CXXFLAGS"] = env.get("CXXFLAGS") or "-O0"
     env["LDFLAGS"] = without_spill_pointers(env.get("LDFLAGS", ""))
+    env["EM_CACHE"] = str(BUILD / "emscripten-cache")
+    Path(env["EM_CACHE"]).mkdir(parents=True, exist_ok=True)
 
     run(
         "emconfigure",

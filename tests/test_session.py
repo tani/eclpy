@@ -124,6 +124,53 @@ class LispApiTests(unittest.TestCase):
             self.assertEqual(lisp.eval(SExp.raw("(+ 1 2)")), 3)
             self.assertEqual(lisp.eval(SExp.raw("(+ 1 2) (+ 3 4)")), 7)
 
+    def test_lisp_load_reads_source_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "loaded.lisp"
+            source.write_text(
+                "\n".join(
+                    [
+                        "(defparameter *loaded-from-file* 88)",
+                        "(defparameter *load-pathname-during-load*",
+                        "  (namestring *load-pathname*))",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with Lisp(require_wasm()) as lisp:
+                self.assertIs(
+                    lisp.eval(SExp.raw(f"(load #p{SExp.string(str(source))})")),
+                    True,
+                )
+                self.assertEqual(lisp.eval(SExp.raw("*loaded-from-file*")), 88)
+                self.assertEqual(
+                    lisp.eval(SExp.raw("*load-pathname-during-load*")),
+                    str(source),
+                )
+
+    def test_lisp_load_missing_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, Lisp(require_wasm()) as lisp:
+            missing = Path(directory) / "missing.lisp"
+
+            self.assertEqual(
+                lisp.eval(SExp.raw(f"(load #p{SExp.string(str(missing))} :if-does-not-exist nil)")),
+                List(),
+            )
+            with self.assertRaisesRegex(EclError, "Cannot open"):
+                lisp.eval(SExp.raw(f"(load #p{SExp.string(str(missing))})"))
+
+    def test_lisp_load_propagates_lisp_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "broken.lisp"
+            source.write_text('(error "boom while loading")\n', encoding="utf-8")
+
+            with (
+                Lisp(require_wasm()) as lisp,
+                self.assertRaisesRegex(EclError, "boom while loading"),
+            ):
+                lisp.eval(SExp.raw(f"(load #p{SExp.string(str(source))})"))
+
     def test_simple_api_builds_shorthand_sexp(self) -> None:
         with Lisp(require_wasm()) as lisp:
             self.assertEqual(lisp.eval(L.expr(1)), 1)

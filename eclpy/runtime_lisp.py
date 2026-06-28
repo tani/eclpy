@@ -5,8 +5,9 @@ from __future__ import annotations
 HELPER_SOURCE = r"""
 (defpackage #:ecl-python
   (:use #:cl)
+  (:shadow #:load)
   (:export #:evaluate #:lookup-symbol #:release-object #:release-all-objects
-           #:serialize #:value))
+           #:native-load #:serialize #:value))
 
 (in-package #:ecl-python)
 
@@ -38,6 +39,24 @@ HELPER_SOURCE = r"""
 
 (defun condition-message (condition)
   (format nil "~A" condition))
+
+(defun load (source &key
+                    (verbose *load-verbose*)
+                    (print *load-print*)
+                    (if-does-not-exist :error)
+                    (external-format :default)
+                    &allow-other-keys)
+  (let* ((pathname (merge-pathnames source))
+         (*package* *package*)
+         (*readtable* *readtable*)
+         (*load-pathname* pathname)
+         (*load-truename* pathname))
+    (native-load pathname verbose print if-does-not-exist external-format)))
+
+(let ((previous-lock (si::package-lock "CL" nil)))
+  (unwind-protect
+       (setf (symbol-function 'cl:load) #'load)
+    (si::package-lock "CL" previous-lock)))
 
 (defun evaluate (thunk)
   (handler-case

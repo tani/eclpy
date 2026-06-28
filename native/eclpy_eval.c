@@ -6,6 +6,12 @@
 static int eclpy_booted = 0;
 static char *eclpy_error = NULL;
 
+#ifdef __wasm__
+__attribute__((import_module("env"), import_name("eclpy_read_file")))
+#endif
+extern int32_t eclpy_read_file(const char *path, int32_t path_len, char **out_data,
+                               int32_t *out_len);
+
 static void eclpy_set_error(const char *message) {
     free(eclpy_error);
     if (message == NULL) {
@@ -26,6 +32,60 @@ static char *eclpy_strdup(const char *value) {
         memcpy(copy, value, length + 1);
     }
     return copy;
+}
+
+static cl_object eclpy_eval_forms(const char *source, int32_t source_len, cl_object print,
+                                  int *saw_form) {
+    cl_object lisp_source = ecl_make_simple_base_string(source, source_len);
+    cl_object stream = ecl_make_string_input_stream(lisp_source, 0, source_len);
+    cl_object eof = ecl_make_symbol("ECLPY-EOF", "KEYWORD");
+    cl_object result = ECL_NIL;
+    cl_object form;
+    *saw_form = 0;
+
+    while (1) {
+        form = cl_read(4, stream, ECL_NIL, eof, ECL_NIL);
+        if (form == eof) {
+            break;
+        }
+        result = cl_eval(form);
+        *saw_form = 1;
+        if (print != ECL_NIL) {
+            cl_prin1(1, result);
+            cl_terpri(0);
+        }
+    }
+
+    return result;
+}
+
+static cl_object eclpy_native_load(cl_object source, cl_object verbose, cl_object print,
+                                   cl_object if_does_not_exist, cl_object external_format) {
+    (void)external_format;
+
+    cl_object namestring = cl_namestring(source);
+    cl_object base = si_coerce_to_base_string(namestring);
+    const char *path = ecl_base_string_pointer_safe(base);
+    int32_t path_len = (int32_t)strlen(path);
+    char *data = NULL;
+    int32_t data_len = 0;
+
+    int32_t status = eclpy_read_file(path, path_len, &data, &data_len);
+    if (status != 0 || data == NULL || data_len < 0) {
+        if (if_does_not_exist == ECL_NIL) {
+            return ECL_NIL;
+        }
+        FEerror("Cannot open ~S.", 1, source);
+    }
+
+    if (verbose != ECL_NIL) {
+        cl_format(3, ECL_T, ecl_make_simple_base_string("~&;;; Loading ~S~%", -1), source);
+    }
+
+    int saw_form = 0;
+    eclpy_eval_forms(data, data_len, print, &saw_form);
+    free(data);
+    return ECL_T;
 }
 
 void *eclpy_alloc(int32_t size) {
@@ -60,6 +120,10 @@ int32_t eclpy_init(void) {
 
     char *argv[] = {"eclpy", NULL};
     cl_boot(1, argv);
+    cl_eval(ecl_read_from_cstring(
+        "(defpackage #:ecl-python (:use #:cl) (:shadow #:load) (:export #:native-load))"));
+    ecl_def_c_function(ecl_read_from_cstring("ecl-python:native-load"),
+                       (cl_objectfn_fixed)eclpy_native_load, 5);
     eclpy_booted = 1;
     return 0;
 }
@@ -85,21 +149,8 @@ char *eclpy_eval(const char *source, int32_t source_len) {
     char *output = NULL;
     cl_env_ptr env = ecl_process_env();
     ECL_CATCH_ALL_BEGIN(env) {
-        cl_object lisp_source = ecl_make_simple_base_string(source_copy, source_len);
-        cl_object stream = ecl_make_string_input_stream(lisp_source, 0, source_len);
-        cl_object eof = ecl_make_symbol("ECLPY-EOF", "KEYWORD");
-        cl_object result = ECL_NIL;
-        cl_object form;
         int saw_form = 0;
-
-        while (1) {
-            form = cl_read(4, stream, ECL_NIL, eof, ECL_NIL);
-            if (form == eof) {
-                break;
-            }
-            result = cl_eval(form);
-            saw_form = 1;
-        }
+        cl_object result = eclpy_eval_forms(source_copy, source_len, ECL_NIL, &saw_form);
 
         if (!saw_form) {
             output = eclpy_strdup("");

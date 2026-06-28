@@ -228,6 +228,8 @@ def _invoke_import(name: str, func_type: wasmtime.FuncType) -> Callable[..., Any
 def _env_import(name: str, *, has_result: bool) -> Callable[..., Any]:
     def callback(caller: wasmtime.Caller, *args: int) -> Any:
         match name:
+            case "eclpy_read_file":
+                return _read_host_file(caller, *args)
             case "emscripten_notify_memory_growth":
                 return None
             case "_emscripten_throw_longjmp":
@@ -242,6 +244,40 @@ def _env_import(name: str, *, has_result: bool) -> Callable[..., Any]:
                 return -WASI_ENOSYS if has_result else None
 
     return callback
+
+
+def _read_host_file(
+    caller: wasmtime.Caller,
+    path_ptr: int,
+    path_len: int,
+    out_data_ptr: int,
+    out_len_ptr: int,
+) -> int:
+    if path_len < 0:
+        return WASI_EINVAL
+
+    memory = _memory(caller)
+    malloc = _caller_func(caller, "malloc")
+    if malloc is None:
+        return WASI_ENOSYS
+
+    try:
+        path_bytes = memory.read(caller, path_ptr, path_ptr + path_len)
+        path = Path(bytes(path_bytes).decode("utf-8"))
+        data = path.read_bytes()
+    except OSError, UnicodeDecodeError, ValueError:
+        return WASI_ENOENT
+
+    allocation_size = max(len(data), 1)
+    data_ptr = malloc(caller, allocation_size)
+    if not isinstance(data_ptr, int) or data_ptr == 0:
+        return WASI_ENOSYS
+
+    if data:
+        memory.write(caller, data, data_ptr)
+    _write_i32(memory, caller, out_data_ptr, data_ptr)
+    _write_i32(memory, caller, out_len_ptr, len(data))
+    return 0
 
 
 def _getcwd(caller: wasmtime.Caller, buf: int, size: int) -> int:
@@ -273,6 +309,10 @@ def _memory(caller: wasmtime.Caller) -> wasmtime.Memory:
 
 def _zero(value_type: wasmtime.ValType) -> float | int:
     return 0.0 if str(value_type) in {"f32", "f64"} else 0
+
+
+def _write_i32(memory: wasmtime.Memory, context: Any, ptr: int, value: int) -> None:
+    memory.write(context, value.to_bytes(4, "little", signed=True), ptr)
 
 
 def _read_c_string(memory: wasmtime.Memory, context: Any, ptr: int) -> str:

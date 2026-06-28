@@ -39,6 +39,19 @@ class FakeMemory:
         return len(self.data)
 
 
+class MutableFakeMemory(FakeMemory):
+    def __init__(self, data: bytes = b"", size: int = 128) -> None:
+        super().__init__(data.ljust(size, b"\0"))
+        self.data = bytearray(self.data)
+
+    def write(self, context, data: bytes, ptr: int) -> None:
+        super().write(context, data, ptr)
+        self.data[ptr : ptr + len(data)] = data
+
+    def read(self, context, start: int, stop: int) -> bytes:
+        return bytes(self.data[start:stop])
+
+
 class FakeCaller:
     def __init__(self, values: dict[str, object] | None = None) -> None:
         self.values = values or {}
@@ -103,6 +116,55 @@ class SessionInternalsTests(unittest.TestCase):
         self.assertEqual(session._read_c_string(FakeMemory(), object(), 0), "")
         self.assertEqual(session._read_c_string(FakeMemory(b"\xffab\0tail"), object(), 0), "")
         self.assertEqual(session._read_c_string(FakeMemory(b"xxhi\0tail"), object(), 2), "hi")
+
+    def test_read_host_file_import(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.multiple(
+                session.wasmtime,
+                Func=FakeFunc,
+                Memory=MutableFakeMemory,
+            ),
+        ):
+            self.assertEqual(
+                session._read_host_file(FakeCaller(), 0, -1, 32, 36),
+                session.WASI_EINVAL,
+            )
+
+            self.assertEqual(
+                session._read_host_file(FakeCaller({"memory": MutableFakeMemory()}), 0, 0, 32, 36),
+                session.WASI_ENOSYS,
+            )
+
+            path = Path(directory) / "source.lisp"
+            path.write_bytes(b"(+ 1 2)")
+
+            memory = MutableFakeMemory(str(path).encode(), size=512)
+            caller = FakeCaller({"memory": memory, "malloc": FakeFunc(lambda caller, size: 128)})
+            status = session._read_host_file(caller, 0, len(str(path)), 32, 36)
+
+            self.assertEqual(status, 0)
+            self.assertEqual(memory.data[32:36], (128).to_bytes(4, "little", signed=True))
+            self.assertEqual(memory.data[36:40], (7).to_bytes(4, "little", signed=True))
+            self.assertEqual(memory.data[128:135], b"(+ 1 2)")
+
+            missing = MutableFakeMemory(b"/missing.lisp", size=128)
+            missing_caller = FakeCaller(
+                {"memory": missing, "malloc": FakeFunc(lambda caller, size: 64)}
+            )
+            self.assertEqual(
+                session._read_host_file(missing_caller, 0, len("/missing.lisp"), 32, 36),
+                session.WASI_ENOENT,
+            )
+
+            failed_allocation = MutableFakeMemory(str(path).encode(), size=128)
+            failed_allocation_caller = FakeCaller(
+                {"memory": failed_allocation, "malloc": FakeFunc(lambda caller, size: 0)}
+            )
+            self.assertEqual(
+                session._read_host_file(failed_allocation_caller, 0, len(str(path)), 32, 36),
+                session.WASI_ENOSYS,
+            )
 
     def test_ecl_session_eval_error_paths_without_wasm(self) -> None:
         ecl = EclSession.__new__(EclSession)
