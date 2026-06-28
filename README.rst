@@ -101,6 +101,8 @@ proper Lisp lists, and ``Cons`` models dotted cons cells:
        assert lisp.eval(L.expr(("STRING=", L.string("foo"), L.string("foo")))) is True
        assert lisp.eval(eclpy.SExp.raw("'CL:CAR")) == eclpy.Symbol("CAR", "COMMON-LISP")
        assert lisp.eval(L.expr(("list", 1, 2, 3))) == eclpy.List(1, 2, 3)
+       assert lisp.eval(L.expr(("length", L.array([1, 2, 3])))) == 3
+       assert lisp.eval(L.expr(("array-dimensions", L.array([[1, 2], [3, 4]])))) == eclpy.List(2, 2)
 
 Public API
 ----------
@@ -227,19 +229,94 @@ ASDF
 
 ``(require 'asdf)`` works out of the box. The wheel bundles ECL's ASDF source
 (``eclpy/asdf.lisp``), and every ``Lisp`` session registers a ``cl:require``
-provider that loads it through the WASM file bridge:
+provider that loads it through the WASM file bridge. The first ``require`` loads
+ASDF; later ``require`` calls in the same Lisp session are no-ops:
 
 .. code-block:: python
 
    import eclpy
+   import eclpy.simple as L
 
    with eclpy.Lisp() as lisp:
-       lisp.eval(eclpy.SExp.raw("(require 'asdf)"))
-       version = lisp.eval(eclpy.SExp.raw("(asdf:asdf-version)"))
+       lisp.eval(L.expr(("require", L.quote("asdf"))))
+
+       asdf = L.find_package(lisp, "ASDF")
+       version = asdf.asdf_version()
        print(version)
+
+       assert lisp.eval(L.expr(("require", L.quote("asdf")))) == eclpy.List()
 
 ASDF is loaded from source with the ordinary ``load`` path, which is fast
 enough thanks to native WebAssembly exception handling.
+
+Load a Local ASDF System
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+To load a local source project, create or point at a directory containing an
+``.asd`` file, push that directory into ``asdf:*central-registry*``, then call
+``asdf:load-system``:
+
+.. code-block:: python
+
+   from pathlib import Path
+
+   import eclpy
+   import eclpy.simple as L
+
+   project = Path("/path/to/demo")
+
+   with eclpy.Lisp() as lisp:
+       lisp.eval(L.expr(("require", L.quote("asdf"))))
+       asdf = L.find_package(lisp, "ASDF")
+
+       lisp.eval(
+           L.expr(("push", L.path(str(project) + "/"), L.symbol("*central-registry*", "ASDF")))
+       )
+       asdf.load_system("demo")
+
+       demo = L.find_package(lisp, "DEMO")
+       assert demo.add(20, 22) == 42
+
+For that example, the host directory could look like this:
+
+.. code-block:: text
+
+   /path/to/demo/
+     demo.asd
+     pkg.lisp
+     math.lisp
+
+.. code-block:: lisp
+
+   ;; demo.asd
+   (defsystem "demo"
+     :serial t
+     :components ((:file "pkg") (:file "math")))
+
+   ;; pkg.lisp
+   (defpackage :demo
+     (:use :cl)
+     (:export :add))
+
+   ;; math.lisp
+   (in-package :demo)
+   (defun add (a b) (+ a b))
+
+Use a trailing slash when pushing a project directory into
+``asdf:*central-registry*``. The examples above build ``#p"/path/to/demo/"``,
+not ``#p"/path/to/demo"``.
+
+Host Files and Limits
+~~~~~~~~~~~~~~~~~~~~~
+
+ASDF sees host files through eclpy's WASM host bridge. ``load``,
+``probe-file``, ``truename``, and ``file-write-date`` can inspect ordinary host
+paths, which is enough for ASDF source projects.
+
+This does not turn the WASM runtime into a full native process environment.
+Shelling out, compiling foreign code, or relying on implementation-specific
+native build steps is out of scope. Prefer source-only systems whose components
+can be loaded directly by ECL inside the packaged WASM runtime.
 
 Runtime Selection
 -----------------

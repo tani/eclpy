@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from fractions import Fraction
+from pathlib import Path
 
 import eclpy.simple as L
 from eclpy import Function, List, Package, SExp, Symbol
@@ -23,7 +24,17 @@ class SimpleApiTests(unittest.TestCase):
         self.assertEqual(str(L.quote(())), "'nil")
         self.assertEqual(str(L.function("+")), "#'+")
         self.assertEqual(str(L.function(Function(object(), "+", "CL"))), "#'CL::+")
+        self.assertEqual(str(L.array([1, "two", L.string("three")])), '#(1 TWO "three")')
+        self.assertEqual(str(L.array([1, 2])), "#(1 2)")
+        self.assertEqual(str(L.array([[1, 2], [3, 4]])), "#2A((1 2) (3 4))")
+        self.assertEqual(str(L.path(Path("/tmp/demo/"))), '#p"/tmp/demo"')
+        self.assertEqual(str(L.path("/tmp/demo/")), '#p"/tmp/demo/"')
         self.assertEqual(str(L.raw("(+ 1 2)")), "(+ 1 2)")
+
+        with self.assertRaisesRegex(TypeError, "one list or tuple"):
+            L.array(1)
+        with self.assertRaisesRegex(ValueError, "rectangular"):
+            L.array([[1], [2, 3]])
 
     def test_expr_converts_supported_values(self) -> None:
         passthrough = SExp.integer(7)

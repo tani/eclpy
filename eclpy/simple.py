@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from .api import Function, Lisp, Package
@@ -10,11 +11,13 @@ from .objects import List, Symbol
 from .sexp import SExp
 
 __all__ = [
+    "array",
     "expr",
     "find_function",
     "find_package",
     "function",
     "keyword",
+    "path",
     "quote",
     "raw",
     "string",
@@ -55,6 +58,23 @@ def symbol(name: str, package: str | None = None) -> SExp:
 def keyword(name: str) -> SExp:
     """Create a Lisp keyword symbol."""
     return SExp.keyword(name)
+
+
+def array(items: Any) -> SExp:
+    """Create a Lisp vector or multidimensional array literal."""
+    if not _is_array_sequence(items):
+        message = "array expects one list or tuple"
+        raise TypeError(message)
+    contents = tuple(items)
+    shape = _array_shape(contents)
+    if len(shape) <= 1:
+        return SExp.raw("#(" + " ".join(str(_literal_expr(item)) for item in contents) + ")")
+    return SExp.raw(f"#{len(shape)}A{_array_contents(contents)}")
+
+
+def path(value: str | os.PathLike[str]) -> SExp:
+    """Create a Lisp pathname literal."""
+    return SExp.raw(f"#p{SExp.string(os.fspath(value))}")
 
 
 def quote(value: Any) -> SExp:
@@ -125,3 +145,30 @@ def _literal_list(items: tuple[Any, ...]) -> SExp:
     if not items:
         return SExp.atom("nil")
     return SExp.list(*(_literal_expr(item) for item in items))
+
+
+def _is_array_sequence(value: Any) -> bool:
+    return isinstance(value, (tuple, list, List))
+
+
+def _array_shape(value: Any) -> tuple[int, ...]:
+    if not _is_array_sequence(value):
+        return ()
+
+    items = tuple(value)
+    if not items:
+        return (0,)
+
+    child_shapes = [_array_shape(item) for item in items]
+    if not any(child_shapes):
+        return (len(items),)
+    if not all(child_shapes) or any(shape != child_shapes[0] for shape in child_shapes):
+        message = "multidimensional Lisp array literals must be rectangular"
+        raise ValueError(message)
+    return (len(items), *child_shapes[0])
+
+
+def _array_contents(value: Any) -> str:
+    if _is_array_sequence(value):
+        return "(" + " ".join(_array_contents(item) for item in tuple(value)) + ")"
+    return str(_literal_expr(value))
