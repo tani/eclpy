@@ -7,38 +7,18 @@ packaged WebAssembly runtime.
 
 ``eclpy`` exposes a cl4py-inspired ``Lisp`` API for evaluating Lisp forms,
 calling functions, accessing packages, and converting common Lisp values to
-Python values. The lower-level ``EclSession`` API is still available as the raw
-WASM boundary.
+Python values. Normal users can start with ``eclpy.simple``; heavier users can
+drop down to explicit ``SExp`` trees or the raw ``EclSession`` bridge.
 
 .. contents::
    :local:
    :depth: 2
 
-Highlights
-==========
-
-.. list-table::
-   :header-rows: 1
-   :widths: 28 72
-
-   * - Area
-     - Behavior
-   * - Runtime
-     - ECL is built as a WebAssembly module and loaded from the wheel.
-   * - Evaluation
-     - ``Lisp.eval`` accepts explicit ``eclpy.SExp`` trees only.
-   * - Simple API
-     - ``eclpy.simple`` provides aggressive Python shorthand for constructing
-       those ``SExp`` trees.
-   * - Interop
-     - Lisp strings, symbols, lists, cons cells, functions, packages, and
-       conditions have explicit Python-side representations.
-   * - Distribution
-     - The ECL source is vendored, while the generated ``*.wasm`` runtime is
-       built locally and excluded from Git history.
+For Beginners
+=============
 
 Install
-=======
+-------
 
 After the package is published to PyPI:
 
@@ -49,8 +29,81 @@ After the package is published to PyPI:
 The wheel is expected to include the ECL WebAssembly runtime, so normal users do
 not need a local ECL installation or an Emscripten toolchain.
 
+Quick Start
+-----------
+
+For everyday use, import ``eclpy.simple`` as a small expression builder:
+
+.. code-block:: python
+
+   from fractions import Fraction
+
+   import eclpy
+   import eclpy.simple as L
+
+   with eclpy.Lisp() as lisp:
+       assert lisp.eval(L.expr(1)) == 1
+       assert lisp.eval(L.expr(("+", 1, 1))) == 2
+       assert lisp.eval(L.expr(("/", ("*", 3, 5), 2))) == Fraction(15, 2)
+       assert lisp.eval(
+           L.expr(("loop", "for", "i", "below", 5, "collect", "i"))
+       ) == eclpy.List(0, 1, 2, 3, 4)
+
+``L.expr`` takes one Python value. Use ``L.expr(("+", 1, 1))``, not
+``L.expr("+", 1, 1)``.
+
+Call Lisp Functions
+-------------------
+
+``find_function`` returns a callable proxy for a Lisp function:
+
+.. code-block:: python
+
+   import eclpy
+   import eclpy.simple as L
+
+   with eclpy.Lisp() as lisp:
+       add = L.find_function(lisp, "+")
+       assert add(1, 2, 3, 4) == 10
+       assert lisp.eval(L.expr([add, 1, 2])) == 3
+
+Use Lisp Packages
+-----------------
+
+``find_package`` returns a package proxy. Attributes are converted to Common
+Lisp symbol names in a cl4py-style way:
+
+.. code-block:: python
+
+   import eclpy
+   import eclpy.simple as L
+
+   with eclpy.Lisp() as lisp:
+       cl = L.find_package(lisp, "CL")
+       assert lisp.eval(L.expr(["package-name", cl])) == "COMMON-LISP"
+       assert cl.oddp(5) is True
+       assert cl.add(2, 3, 4, 5) == 14        # +
+       assert cl.stringgt("baz", "bar") == 2  # STRING>
+       assert cl.print_base == 10             # *PRINT-BASE*
+
+Strings, Symbols, Lists
+-----------------------
+
+Strings and symbols stay distinct on both sides of the bridge. ``List`` models
+proper Lisp lists, and ``Cons`` models dotted cons cells:
+
+.. code-block:: python
+
+   import eclpy
+   import eclpy.simple as L
+
+   with eclpy.Lisp() as lisp:
+       assert lisp.eval(L.expr(("STRING=", L.string("foo"), L.string("foo")))) is True
+       assert lisp.eval(eclpy.SExp.raw("'CL:CAR")) == eclpy.Symbol("CAR", "COMMON-LISP")
+       assert lisp.eval(L.expr(("list", 1, 2, 3))) == eclpy.List(1, 2, 3)
+
 Public API
-==========
+----------
 
 ``eclpy`` exports these public Python objects:
 
@@ -70,16 +123,18 @@ Public API
    )
 
 ``Function`` and ``Package`` are the callable and package proxies returned by
-``eclpy.simple.find_function`` and ``eclpy.simple.find_package``.
+``eclpy.simple.find_function`` and ``eclpy.simple.find_package``. ``Reference``
+is a scoped handle for Lisp objects that cannot be copied directly into Python.
 
-Use From Python
+For Heavy Users
 ===============
 
 Strict ``SExp`` Evaluation
 --------------------------
 
-The high-level API receives a syntax tree first. ``SExp.__str__`` renders that
-tree to Lisp source only at the WASM boundary.
+``Lisp.eval`` accepts explicit ``eclpy.SExp`` values only. It does not accept
+Python values, tuples, ``Symbol`` objects, or source strings directly. The
+syntax tree is rendered to Lisp source only at the WASM boundary.
 
 .. code-block:: python
 
@@ -108,9 +163,6 @@ tree to Lisp source only at the WASM boundary.
            )
        ) == Fraction(15, 2)
 
-``Lisp.eval`` only accepts explicit ``eclpy.SExp`` values. It does not accept
-Python values, tuples, ``Symbol`` objects, or source strings directly.
-
 Use ``eclpy.SExp.raw(...)`` when you intentionally need raw Lisp source:
 
 .. code-block:: python
@@ -121,73 +173,11 @@ Use ``eclpy.SExp.raw(...)`` when you intentionally need raw Lisp source:
        assert lisp.eval(eclpy.SExp.raw("(+ 1 2)")) == 3
        assert lisp.eval(eclpy.SExp.raw("(+ 1 2) (+ 3 4)")) == 7
 
-Simple API Shorthand
---------------------
+References
+----------
 
-For shorthand syntax, use the separate Simple API layer:
-
-.. code-block:: python
-
-   from fractions import Fraction
-
-   import eclpy
-   import eclpy.simple as L
-
-   with eclpy.Lisp() as lisp:
-       assert lisp.eval(L.expr(1)) == 1
-       assert lisp.eval(L.expr(("+", 1, 1))) == 2
-       assert lisp.eval(L.expr(("/", ("*", 3, 5), 2))) == Fraction(15, 2)
-       assert lisp.eval(
-           L.expr(("loop", "for", "i", "below", 5, "collect", "i"))
-       ) == eclpy.List(0, 1, 2, 3, 4)
-       assert lisp.eval(
-           L.expr(["mapcar", L.find_function(lisp, "+"), [1, 2], [3, 4]])
-       ) == eclpy.List(4, 6)
-       assert lisp.eval(L.expr([L.find_function(lisp, "+"), 1, 2])) == 3
-
-.. note::
-
-   ``L.expr`` takes one Python value. Use ``L.expr(("+", 1, 1))``, not
-   ``L.expr("+", 1, 1)``.
-
-Strings and Symbols
--------------------
-
-Strings and symbols stay distinct on both sides of the bridge:
-
-.. code-block:: python
-
-   import eclpy
-   import eclpy.simple as L
-
-   with eclpy.Lisp() as lisp:
-       form = L.expr(("STRING=", L.string("foo"), L.string("foo")))
-       assert lisp.eval(form) is True
-       assert lisp.eval(eclpy.SExp.symbol("*PRINT-BASE*", "COMMON-LISP")) == 10
-       assert lisp.eval(eclpy.SExp.raw("'CL:CAR")) == eclpy.Symbol("CAR", "COMMON-LISP")
-
-Functions and Packages
-----------------------
-
-You can look up functions and packages:
-
-.. code-block:: python
-
-   import eclpy
-   import eclpy.simple as L
-
-   with eclpy.Lisp() as lisp:
-       add = L.find_function(lisp, "+")
-       assert add(1, 2, 3, 4) == 10
-
-       cl = L.find_package(lisp, "CL")
-       assert lisp.eval(L.expr(["package-name", cl])) == "COMMON-LISP"
-       assert cl.oddp(5) is True
-       assert cl.cons(5, None) == eclpy.List(5)
-       assert cl.remove(5, [1, -5, 2, 7, 5, 9], key=cl.abs) == [1, 2, 7, 9]
-       assert cl.mapcar(cl.constantly(4), (1, 2, 3)) == eclpy.List(4, 4, 4)
-
-Lisp references can be scoped with ``with``:
+Some Lisp values are returned as ``Reference`` handles. Scope them with
+``with`` or release them by closing the owning ``Lisp`` session:
 
 .. code-block:: python
 
@@ -199,21 +189,8 @@ Lisp references can be scoped with ``with``:
        with cl.constantly(4) as fn:
            assert cl.mapcar(fn, (1, 2, 3)) == eclpy.List(4, 4, 4)
 
-``Package`` attributes follow cl4py-style name conversion:
-
-.. code-block:: python
-
-   import eclpy
-   import eclpy.simple as L
-
-   with eclpy.Lisp() as lisp:
-       cl = L.find_package(lisp, "CL")
-       assert cl.add(2, 3, 4, 5) == 14        # +
-       assert cl.stringgt("baz", "bar") == 2  # STRING>
-       assert cl.print_base == 10             # *PRINT-BASE*
-
-Conses and Lists
-----------------
+Conses and Proper Lists
+-----------------------
 
 ``eclpy.Cons`` and ``eclpy.List`` model Lisp cons cells and proper lists:
 
@@ -262,8 +239,7 @@ provider that loads it through the WASM file bridge:
        print(version)
 
 ASDF is loaded from source with the ordinary ``load`` path, which is fast
-enough thanks to the native WebAssembly exception handling described in
-`Runtime Notes`_.
+enough thanks to native WebAssembly exception handling.
 
 Runtime Selection
 -----------------
@@ -303,11 +279,15 @@ details:
            print(exc.condition_type)
            print(exc.message)
 
+For Developers
+==============
+
 Test
-====
+----
 
 .. code-block:: sh
 
+   uv run ruff check .
    uv run basedpyright
    uv run python -m unittest discover -s tests
    uv run coverage run -m unittest discover -s tests
@@ -319,9 +299,6 @@ cons/list conversion, higher-order Lisp functions, reference lifecycle, result
 parsing, ``(require 'asdf)`` module loading, missing runtime errors, Lisp-side
 exceptions, and internal runtime error paths. Coverage is configured to fail
 below 100% for the Python package.
-
-Source Builds and Wheels
-========================
 
 Build the WASM Runtime
 ----------------------
@@ -379,7 +356,7 @@ You can smoke-test the built wheel outside the source tree:
      python -c 'import eclpy; import eclpy.simple as L; print(eclpy.Lisp().eval(L.expr(("+", 10, 32))))'
 
 Runtime Notes
-=============
+-------------
 
 The current Emscripten build emits a core wasm module that imports
 ``wasi_snapshot_preview1`` plus Emscripten ``env`` functions. The Python loader
