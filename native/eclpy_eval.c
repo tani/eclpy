@@ -120,6 +120,13 @@ int32_t eclpy_init(void) {
 
     char *argv[] = {"eclpy", NULL};
     cl_boot(1, argv);
+    /* Documentation lookups otherwise consult the on-disk help database
+     * (SYS:help.doc), which cannot be opened in the standalone WASM sandbox and
+     * aborts loading documented code such as ASDF. Keep only the in-memory
+     * dictionaries so documentation never touches the filesystem. */
+    cl_eval(ecl_read_from_cstring(
+        "(setf ext:*documentation-pool* "
+        "(remove-if-not #'hash-table-p ext:*documentation-pool*))"));
     cl_eval(ecl_read_from_cstring(
         "(defpackage #:ecl-python (:use #:cl) (:shadow #:load) (:export #:native-load))"));
     ecl_def_c_function(ecl_read_from_cstring("ecl-python:native-load"),

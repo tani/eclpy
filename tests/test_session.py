@@ -10,6 +10,7 @@ from pathlib import Path
 
 import eclpy.simple as L
 from eclpy import Cons, EclError, EclSession, Lisp, LispReference, List, SExp, Symbol
+from eclpy.api import ASDF_SOURCE
 from eclpy.reader import parse_one
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +25,12 @@ def require_wasm() -> Path:
     if not wasm_path.is_file():
         raise unittest.SkipTest("ECL WASM artifact is not built")
     return wasm_path
+
+
+def require_asdf_source() -> Path:
+    if not ASDF_SOURCE.is_file():
+        raise unittest.SkipTest("ASDF source is not bundled")
+    return ASDF_SOURCE
 
 
 class EclSessionTests(unittest.TestCase):
@@ -170,6 +177,19 @@ class LispApiTests(unittest.TestCase):
                 self.assertRaisesRegex(EclError, "boom while loading"),
             ):
                 lisp.eval(SExp.raw(f"(load #p{SExp.string(str(source))})"))
+
+    def test_require_asdf(self) -> None:
+        require_asdf_source()
+        with Lisp(require_wasm()) as lisp:
+            lisp.eval(SExp.raw("(require 'asdf)"))
+            self.assertIs(lisp.eval(SExp.raw("(and (find-package :asdf) t)")), True)
+            self.assertIsInstance(lisp.eval(SExp.raw("(asdf:asdf-version)")), str)
+            # ASDF is registered, so requiring it again loads nothing new.
+            self.assertEqual(lisp.eval(SExp.raw("(require 'asdf)")), List())
+
+    def test_require_unknown_module_raises(self) -> None:
+        with Lisp(require_wasm()) as lisp, self.assertRaisesRegex(EclError, "REQUIRE"):
+            lisp.eval(SExp.raw("(require 'no-such-module-xyz)"))
 
     def test_simple_api_builds_shorthand_sexp(self) -> None:
         with Lisp(require_wasm()) as lisp:

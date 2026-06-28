@@ -7,12 +7,15 @@ HELPER_SOURCE = r"""
   (:use #:cl)
   (:shadow #:load)
   (:export #:evaluate #:lookup-symbol #:release-object #:release-all-objects
-           #:native-load #:serialize #:value))
+           #:native-load #:serialize #:value #:*asdf-source*))
 
 (in-package #:ecl-python)
 
 (defvar *objects* (make-hash-table :test #'eql))
 (defvar *next-id* 0)
+
+(defvar *asdf-source* nil
+  "Host pathname of the bundled ASDF source, set from Python, or NIL.")
 
 (defun store-object (value)
   (let ((id (incf *next-id*)))
@@ -57,6 +60,15 @@ HELPER_SOURCE = r"""
   (unwind-protect
        (setf (symbol-function 'cl:load) #'load)
     (si::package-lock "CL" previous-lock)))
+
+(defun provide-asdf (module)
+  "REQUIRE provider that loads the bundled ASDF source for module ASDF."
+  (when (and *asdf-source* (string-equal (string module) "ASDF"))
+    (load *asdf-source*)
+    (provide "ASDF")
+    t))
+
+(pushnew 'provide-asdf ext:*module-provider-functions*)
 
 (defun evaluate (thunk)
   (handler-case

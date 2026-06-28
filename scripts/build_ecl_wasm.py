@@ -21,6 +21,8 @@ HOST_PREFIX = BUILD / "ecl-host"
 WASM_PREFIX = BUILD / "ecl-wasm"
 OUT_WASM = BUILD / "eclpy" / "ecl_eval.wasm"
 PACKAGE_WASM = ROOT / "eclpy" / "ecl_eval.wasm"
+VENDORED_ASDF = VENDORED_ECL / "contrib" / "asdf" / "asdf.lisp"
+PACKAGE_ASDF = ROOT / "eclpy" / "asdf.lisp"
 ECL_WASM_PATCH_DIR = ROOT / "patch" / "ecl-wasm"
 
 ECL_LIBS = [
@@ -33,6 +35,19 @@ ECL_LIBS = [
 EXPORTED_FUNCTIONS = (
     "['_eclpy_alloc','_eclpy_free','_eclpy_init','_eclpy_eval',"
     "'_eclpy_last_error','_eclpy_shutdown','_malloc','_free']"
+)
+# Lower ECL's pervasive setjmp/longjmp to native WebAssembly exception handling
+# instead of Emscripten's JS `invoke_*` trampolines, which otherwise cross the
+# wasm/host boundary on nearly every Lisp call. `-fwasm-exceptions` keeps C++
+# exception handling (the bundled Boehm GC compiles with `-fexceptions`) on the
+# same wasm mechanism, which is required alongside wasm setjmp/longjmp.
+# WASM_LEGACY_EXCEPTIONS=0 emits the standard exception-handling proposal that
+# wasmtime implements. These flags must match at compile and link time, so they
+# go into CFLAGS/CXXFLAGS and the link.
+WASM_EH_FLAGS = (
+    "-fwasm-exceptions",
+    "-sSUPPORT_LONGJMP=wasm",
+    "-sWASM_LEGACY_EXCEPTIONS=0",
 )
 UNSUPPORTED_PRLIMIT64_WARNING = "unsupported syscall: __syscall_prlimit64"
 
@@ -86,12 +101,13 @@ def build_wasm(host_ecl: Path, *, force: bool) -> Path:
     apply_patch_dir(source, ECL_WASM_PATCH_DIR)
     shutil.rmtree(WASM_PREFIX, ignore_errors=True)
 
+    eh_flags = " ".join(WASM_EH_FLAGS)
     env = os.environ.copy()
     env["ECL_TO_RUN"] = str(host_ecl)
     env["CC_FOR_BUILD"] = env.get("CC_FOR_BUILD") or shutil.which("cc") or "cc"
-    env["CFLAGS"] = env.get("CFLAGS") or "-O0"
-    env["CXXFLAGS"] = env.get("CXXFLAGS") or "-O0"
-    env["LDFLAGS"] = without_spill_pointers(env.get("LDFLAGS", ""))
+    env["CFLAGS"] = f"{env.get('CFLAGS') or '-O0'} {eh_flags}"
+    env["CXXFLAGS"] = f"{env.get('CXXFLAGS') or '-O0'} {eh_flags}"
+    env["LDFLAGS"] = f"{without_spill_pointers(env.get('LDFLAGS', ''))} {eh_flags}".strip()
     env["EM_CACHE"] = str(BUILD / "emscripten-cache")
     Path(env["EM_CACHE"]).mkdir(parents=True, exist_ok=True)
 
@@ -144,6 +160,7 @@ def link_wrapper() -> Path:
         "-sSTANDALONE_WASM=1",
         "-sALLOW_MEMORY_GROWTH=1",
         "-sSTACK_SIZE=1048576",
+        *WASM_EH_FLAGS,
         "-lm",
         f"-sEXPORTED_FUNCTIONS={EXPORTED_FUNCTIONS}",
         "-sEXPORTED_RUNTIME_METHODS=[]",
@@ -158,6 +175,16 @@ def package_wasm() -> Path:
     shutil.copy2(OUT_WASM, PACKAGE_WASM)
     print(f"packaged {PACKAGE_WASM}")
     return PACKAGE_WASM
+
+
+def package_asdf() -> Path:
+    if not VENDORED_ASDF.is_file():
+        message = f"missing vendored ASDF source: {VENDORED_ASDF}"
+        raise SystemExit(message)
+    PACKAGE_ASDF.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(VENDORED_ASDF, PACKAGE_ASDF)
+    print(f"packaged {PACKAGE_ASDF}")
+    return PACKAGE_ASDF
 
 
 def include_root() -> Path:
@@ -221,6 +248,7 @@ def main() -> None:
     build_wasm(build_host(force=args.force), force=args.force or args.force_wasm)
     print(f"built {link_wrapper()}")
     package_wasm()
+    package_asdf()
     if not args.skip_smoke:
         smoke_test()
 

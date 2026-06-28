@@ -10,7 +10,7 @@ from unittest.mock import patch
 from eclpy import EclError, EclSession, session
 
 
-def fake_engine() -> object:
+def fake_engine(config: object = None) -> object:
     return object()
 
 
@@ -60,14 +60,6 @@ class FakeCaller:
         return self.values.get(name)
 
 
-class FakeTable:
-    def __init__(self, value: object) -> None:
-        self.value = value
-
-    def get(self, caller, index: int) -> object:
-        return self.value
-
-
 class FakeFuncType:
     def __init__(self, results=()) -> None:
         self.results = list(results)
@@ -103,14 +95,11 @@ class SessionInternalsTests(unittest.TestCase):
                     session._resolve_wasm_path(None), {session.PACKAGE_WASM, session.BUILD_WASM}
                 )
 
-    def test_export_and_zero_helpers(self) -> None:
+    def test_export_helper(self) -> None:
         value = FakeFunc()
         self.assertIs(session._export({"f": value}, "f", FakeFunc), value)
         with self.assertRaisesRegex(EclError, "does not export"):
             session._export({}, "missing", FakeFunc)
-        self.assertEqual(session._zero("i32"), 0)
-        self.assertEqual(session._zero("f32"), 0.0)
-        self.assertEqual(session._zero("f64"), 0.0)
 
     def test_read_c_string(self) -> None:
         self.assertEqual(session._read_c_string(FakeMemory(), object(), 0), "")
@@ -314,47 +303,10 @@ class SessionInternalsTests(unittest.TestCase):
             session._define_emscripten_imports(linker, module)
         self.assertEqual([item[1] for item in linker.defined], ["invoke_ii", "regular"])
 
-    def test_invoke_import_paths(self) -> None:
-        with patch.multiple(session.wasmtime, Table=FakeTable, Func=FakeFunc):
-            callback = session._invoke_import("invoke_ii", FakeFuncType(["i32"]))
-            with self.assertRaisesRegex(EclError, "indirect function table"):
-                callback(FakeCaller(), 0)
-            with self.assertRaisesRegex(EclError, "missing table entry"):
-                callback(FakeCaller({"__indirect_function_table": FakeTable(object())}), 0)
-
-            caller = FakeCaller(
-                {"__indirect_function_table": FakeTable(FakeFunc(lambda caller, x: x + 1))}
-            )
-            self.assertEqual(callback(caller, 0, 4), 5)
-
-            no_result = session._invoke_import("invoke_v", FakeFuncType([]))
-            caller = FakeCaller(
-                {"__indirect_function_table": FakeTable(FakeFunc(lambda caller: 99))}
-            )
-            self.assertIsNone(no_result(caller, 0))
-
-            restore_stack = FakeFunc()
-            set_threw = FakeFunc()
-            longjmp_caller = FakeCaller(
-                {
-                    "__indirect_function_table": FakeTable(
-                        FakeFunc(lambda caller: (_ for _ in ()).throw(session._LongjmpError()))
-                    ),
-                    "emscripten_stack_get_current": FakeFunc(lambda caller: 123),
-                    "_emscripten_stack_restore": restore_stack,
-                    "setThrew": set_threw,
-                }
-            )
-            self.assertEqual(callback(longjmp_caller, 0), 0)
-            self.assertEqual(restore_stack.calls[-1], (longjmp_caller, 123))
-            self.assertEqual(set_threw.calls[-1], (longjmp_caller, 1, 0))
-
     def test_env_import_and_syscall_helpers(self) -> None:
         self.assertIsNone(
             session._env_import("emscripten_notify_memory_growth", has_result=False)(FakeCaller())
         )
-        with self.assertRaises(session._LongjmpError):
-            session._env_import("_emscripten_throw_longjmp", has_result=False)(FakeCaller())
         self.assertEqual(
             session._env_import("_emscripten_system", has_result=True)(FakeCaller()), -1
         )

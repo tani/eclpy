@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import wasmtime
 
@@ -32,10 +32,6 @@ class EclError(RuntimeError):
         self.condition_type = condition_type
 
 
-class _LongjmpError(Exception):
-    pass
-
-
 class EclSession:
     """A persistent ECL process hosted inside a WebAssembly instance."""
 
@@ -51,7 +47,7 @@ class EclSession:
 
         self._lock = threading.RLock()
         self._closed = False
-        self._engine = wasmtime.Engine()
+        self._engine = wasmtime.Engine(_engine_config())
         self._store = wasmtime.Store(self._engine)
 
         wasi = wasmtime.WasiConfig()
@@ -152,6 +148,17 @@ class EclSession:
         return _read_c_string(self._memory, self._store, self._call_i32(self._last_error))
 
 
+def _engine_config() -> wasmtime.Config:
+    # ECL lowers setjmp/longjmp to native WebAssembly exception handling (see the
+    # build script's WASM_EH_FLAGS). The standard exceptions proposal builds on the
+    # function-references and GC proposals, so all three must be enabled here.
+    config = wasmtime.Config()
+    config.wasm_exceptions = True
+    config.wasm_function_references = True
+    config.wasm_gc = True
+    return config
+
+
 def _resolve_wasm_path(wasm_path: str | os.PathLike[str] | None) -> Path:
     if wasm_path is not None:
         return Path(wasm_path).expanduser().resolve()
@@ -170,11 +177,7 @@ def _export(exports: Any, name: str, expected_type: type[Any]) -> Any:
 
 def _define_emscripten_imports(linker: wasmtime.Linker, module: wasmtime.Module) -> None:
     for name, func_type in _env_func_imports(module):
-        callback = (
-            _invoke_import(name, func_type)
-            if name.startswith("invoke_")
-            else _env_import(name, has_result=bool(list(func_type.results)))
-        )
+        callback = _env_import(name, has_result=bool(list(func_type.results)))
         linker.define_func("env", name, func_type, callback, access_caller=True)
 
 
@@ -194,37 +197,6 @@ def _env_func_imports(module: wasmtime.Module) -> list[tuple[str, wasmtime.FuncT
     return imports
 
 
-def _invoke_import(name: str, func_type: wasmtime.FuncType) -> Callable[..., Any]:
-    results = list(func_type.results)
-    zero = _zero(results[0]) if results else None
-
-    def invoke(caller: wasmtime.Caller, index: int, *args: int) -> Any:
-        table = caller.get("__indirect_function_table")
-        if not isinstance(table, wasmtime.Table):
-            message = "Emscripten indirect function table is not exported"
-            raise EclError(message)
-        func = table.get(cast(wasmtime.Store, caller), index)
-        if not isinstance(func, wasmtime.Func):
-            message = f"Emscripten invoke `{name}` missing table entry {index}"
-            raise EclError(message)
-
-        get_stack = _caller_func(caller, "emscripten_stack_get_current")
-        restore_stack = _caller_func(caller, "_emscripten_stack_restore")
-        stack_pointer = get_stack(caller) if get_stack else None
-        try:
-            result = func(caller, *args)
-        except _LongjmpError:
-            if stack_pointer is not None and restore_stack:
-                restore_stack(caller, stack_pointer)
-            if set_threw := _caller_func(caller, "setThrew"):
-                set_threw(caller, 1, 0)
-            return zero
-
-        return result if results else None
-
-    return invoke
-
-
 def _env_import(name: str, *, has_result: bool) -> Callable[..., Any]:
     def callback(caller: wasmtime.Caller, *args: int) -> Any:
         match name:
@@ -232,8 +204,6 @@ def _env_import(name: str, *, has_result: bool) -> Callable[..., Any]:
                 return _read_host_file(caller, *args)
             case "emscripten_notify_memory_growth":
                 return None
-            case "_emscripten_throw_longjmp":
-                raise _LongjmpError
             case "_emscripten_system":
                 return -1
             case "__syscall_getcwd":
@@ -305,10 +275,6 @@ def _memory(caller: wasmtime.Caller) -> wasmtime.Memory:
         message = "ECL WASM module does not export memory"
         raise EclError(message)
     return value
-
-
-def _zero(value_type: wasmtime.ValType) -> float | int:
-    return 0.0 if str(value_type) in {"f32", "f64"} else 0
 
 
 def _write_i32(memory: wasmtime.Memory, context: Any, ptr: int, value: int) -> None:

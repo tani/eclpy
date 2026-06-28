@@ -11,5 +11,8 @@ coverage.xml
 htmlcov/
 *.wasm
 
+# Generated runtime artifact: ASDF source copied from the vendored ECL tree
+/eclpy/asdf.lisp
+
 # Virtual environments
 .venv

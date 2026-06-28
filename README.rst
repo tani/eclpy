@@ -222,6 +222,26 @@ Conses and Lists
        assert values.car == 1
        assert list(values) == [1, 2]
 
+ASDF
+----
+
+``(require 'asdf)`` works out of the box. The wheel bundles ECL's ASDF source
+(``eclpy/asdf.lisp``), and every ``Lisp`` session registers a ``cl:require``
+provider that loads it through the WASM file bridge:
+
+.. code-block:: python
+
+   import eclpy
+
+   with eclpy.Lisp() as lisp:
+       lisp.eval(eclpy.SExp.raw("(require 'asdf)"))
+       version = lisp.eval(eclpy.SExp.raw("(asdf:asdf-version)"))
+       print(version)
+
+ASDF is loaded from source with the ordinary ``load`` path, which is fast
+enough thanks to the native WebAssembly exception handling described in
+`Runtime Notes`_.
+
 Runtime Selection
 -----------------
 
@@ -273,8 +293,9 @@ Test
 The tests cover raw low-level evaluation, strict ``SExp`` evaluation, Simple API
 shorthand evaluation, package/function lookup, macros and special forms,
 cons/list conversion, higher-order Lisp functions, reference lifecycle, result
-parsing, missing runtime errors, Lisp-side exceptions, and internal runtime
-error paths. Coverage is configured to fail below 100% for the Python package.
+parsing, ``(require 'asdf)`` module loading, missing runtime errors, Lisp-side
+exceptions, and internal runtime error paths. Coverage is configured to fail
+below 100% for the Python package.
 
 Source Builds and Wheels
 ========================
@@ -294,9 +315,11 @@ applied only to copied source trees under ``build/``.
 The script:
 
 * builds a native host ECL used for cross-compilation;
-* builds the vendored ECL source for ``wasm32-unknown-emscripten``;
+* builds the vendored ECL source for ``wasm32-unknown-emscripten``, lowering
+  setjmp/longjmp to native WebAssembly exception handling;
 * links ``native/eclpy_eval.c`` into ``build/eclpy/ecl_eval.wasm``;
 * copies the runtime to ``eclpy/ecl_eval.wasm`` for wheel packaging;
+* copies the vendored ASDF source to ``eclpy/asdf.lisp``;
 * runs a Python smoke test through ``EclSession()``.
 
 Build a Wheel
@@ -322,6 +345,7 @@ The wheel should contain:
    eclpy/runtime_lisp.py
    eclpy/sexp.py
    eclpy/ecl_eval.wasm
+   eclpy/asdf.lisp
 
 You can smoke-test the built wheel outside the source tree:
 
@@ -339,6 +363,14 @@ The current Emscripten build emits a core wasm module that imports
 provides the minimal Emscripten compatibility shims needed by this runtime.
 The build disables ECL's runtime stack-size probing on Emscripten, avoiding the
 unsupported ``prlimit64`` startup syscall path.
+
+ECL relies heavily on setjmp/longjmp for its condition system and binding
+stack. The build lowers these to native WebAssembly exception handling
+(``-sSUPPORT_LONGJMP=wasm -sWASM_LEGACY_EXCEPTIONS=0``) rather than Emscripten's
+JavaScript ``invoke_*`` trampolines, which would otherwise cross the wasm/host
+boundary on nearly every Lisp call. The loader enables the matching wasmtime
+features (exceptions, function references, GC). This is what makes loading large
+libraries such as ASDF practical.
 
 WASI 0.3 requires a component-model toolchain/runtime path. The local
 Emscripten 6.0.1 and ``wasmtime`` Python package used here do not expose that

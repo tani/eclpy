@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import suppress
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
 
 from .decode import decode_result, decode_value, node_tag, optional_string, symbol_atom
@@ -16,6 +17,8 @@ from .sexp import SExp
 
 if TYPE_CHECKING:
     from os import PathLike
+
+ASDF_SOURCE = Path(__file__).with_name("asdf.lisp")
 
 _OPERATOR_NAMES = {
     "add": "+",
@@ -118,6 +121,15 @@ class Lisp:
         self._closed = False
         self._references: dict[int, LispReference] = {}
         self.session.eval(HELPER_SOURCE)
+        self._register_asdf()
+
+    def _register_asdf(self) -> None:
+        form = SExp.list(
+            SExp.atom("setf"),
+            SExp.atom("ecl-python:*asdf-source*"),
+            SExp.raw(f"#p{SExp.string(str(ASDF_SOURCE))}"),
+        )
+        self.session.eval(str(form))
 
     def eval(self, form: Any) -> Any:
         """Evaluate an explicit S-expression."""
