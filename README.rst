@@ -255,6 +255,7 @@ Test
 
 .. code-block:: sh
 
+   uv run basedpyright
    uv run python -m unittest
    uv run coverage run -m unittest
    uv run coverage report -m

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import wasmtime
 
@@ -178,13 +178,15 @@ def _env_func_imports(module: wasmtime.Module) -> list[tuple[str, wasmtime.FuncT
     imports: list[tuple[str, wasmtime.FuncType]] = []
     seen: set[str] = set()
     for item in module.imports:
+        name = item.name
         if (
-            item.module == "env"
-            and item.name not in seen
+            name is not None
+            and item.module == "env"
+            and name not in seen
             and isinstance(item.type, wasmtime.FuncType)
         ):
-            seen.add(item.name)
-            imports.append((item.name, item.type))
+            seen.add(name)
+            imports.append((name, item.type))
     return imports
 
 
@@ -197,7 +199,7 @@ def _invoke_import(name: str, func_type: wasmtime.FuncType) -> Callable[..., Any
         if not isinstance(table, wasmtime.Table):
             message = "Emscripten indirect function table is not exported"
             raise EclError(message)
-        func = table.get(caller, index)
+        func = table.get(cast(wasmtime.Store, caller), index)
         if not isinstance(func, wasmtime.Func):
             message = f"Emscripten invoke `{name}` missing table entry {index}"
             raise EclError(message)

@@ -25,6 +25,7 @@ artifacts = ["eclpy/ecl_eval.wasm"]
 
 [dependency-groups]
 dev = [
+    "basedpyright>=1.39.9",
     "coverage>=7.14.3",
     "ruff>=0.15.20",
 ]
@@ -35,6 +36,12 @@ source = ["eclpy"]
 [tool.coverage.report]
 fail_under = 100
 show_missing = true
+
+[tool.basedpyright]
+include = ["eclpy"]
+exclude = ["build", "dist", "vendor"]
+pythonVersion = "3.14"
+typeCheckingMode = "basic"
 
 [tool.ruff]
 line-length = 100
