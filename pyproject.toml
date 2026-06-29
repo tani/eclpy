@@ -23,6 +23,10 @@ build-backend = "hatchling.build"
 packages = ["eclpy"]
 artifacts = ["eclpy/ecl_eval.wasm", "eclpy/asdf.lisp"]
 
+[tool.hatch.build.targets.sdist.force-include]
+"eclpy/ecl_eval.wasm" = "eclpy/ecl_eval.wasm"
+"eclpy/asdf.lisp" = "eclpy/asdf.lisp"
+
 [tool.hatch.build.hooks.custom]
 path = "scripts/hatch_build.py"
 
@@ -39,6 +43,9 @@ source = ["eclpy"]
 [tool.coverage.report]
 fail_under = 100
 show_missing = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [tool.basedpyright]
 include = ["eclpy"]

@@ -27,6 +27,7 @@ class SyntaxApiTests(unittest.TestCase):
         self.assertEqual(str(L.array([1, 2])), "#(1 2)")
         self.assertEqual(str(L.array((1, 2))), "#(1 2)")
         self.assertEqual(str(L.array([[1, 2], [3, 4]])), "#2A((1 2) (3 4))")
+        self.assertEqual(str(L.array([[]])), "#2A(())")
         self.assertEqual(str(L.array(((1, 2), (3, 4)))), "#2A((1 2) (3 4))")
         self.assertEqual(str(L.path(Path("/tmp/demo/"))), '#p"/tmp/demo"')
         self.assertEqual(str(L.path("/tmp/demo/")), '#p"/tmp/demo/"')

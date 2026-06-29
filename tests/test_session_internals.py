@@ -315,6 +315,11 @@ class SessionInternalsTests(unittest.TestCase):
         self.assertIsNone(session._env_import("unknown", has_result=False)(FakeCaller()))
 
         with patch.object(session.wasmtime, "Memory", FakeMemory):
+            self.assertEqual(
+                session._stat_host_file(FakeCaller(), 0, -1, 32, 40),
+                session.WASI_EINVAL,
+            )
+
             memory = FakeMemory(b"x.\0bad\0")
             caller = FakeCaller({"memory": memory})
             self.assertEqual(session._getcwd(caller, 10, 0), -session.WASI_EINVAL)

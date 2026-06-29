@@ -91,7 +91,7 @@ def to_data_expr(value: Any) -> SExp:
             return SExp.atom("nil")
         case True:
             return SExp.atom("t")
-        case int() as integer if not isinstance(value, bool):
+        case int() as integer:
             return SExp.integer(integer)
         case Fraction() as ratio:
             return SExp.ratio(ratio)

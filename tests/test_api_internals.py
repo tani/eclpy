@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from eclpy import EclError, Lisp, Reference, SExp, Symbol
 from eclpy.decode import decode_value
-from eclpy.proxy import Package
+from eclpy.proxy import Package, _attribute_candidates
 
 
 class FakeSession:
@@ -36,11 +36,16 @@ class ApiInternalsTests(unittest.TestCase):
         function_lisp = SimpleNamespace(
             _eval_helper=lambda form: [":CALLABLE", ":FUNCTION", "FOO", "CL"]
         )
-        self.assertTrue(callable(Package(function_lisp, "CL").foo))
+        callable_symbol = Package(function_lisp, "CL").foo
+        self.assertTrue(callable(callable_symbol))
+        self.assertEqual(repr(callable_symbol), "CL::FOO")
 
         missing_lisp = SimpleNamespace(_eval_helper=lambda form: [":MISSING"])
         with self.assertRaises(AttributeError):
             _ = Package(missing_lisp, "CL").missing
+
+    def test_attribute_candidates_preserve_earmuff_names(self) -> None:
+        self.assertEqual(_attribute_candidates("*features*"), ["*FEATURES*"])
 
     def test_lisp_close_decode_and_closed_eval(self) -> None:
         lisp = Lisp(session=FakeSession())

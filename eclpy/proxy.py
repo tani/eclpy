@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from .decode import decode_value, node_tag, optional_string, symbol_atom
+from .decode import decode_value, node_tag, optional_string
 from .encode import to_syntax_api_expr
 from .objects import Symbol
 from .sexp import SExp
@@ -34,7 +34,6 @@ class _CallableSymbol:
     lisp: Lisp
     name: str
     package: str | None = None
-    kind: str = "function"
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         parts = [SExp.symbol(self.name, self.package)]
@@ -77,12 +76,10 @@ class Package:
                 case ":MISSING":
                     continue
                 case ":CALLABLE":
-                    kind = symbol_atom(result[1]).lower().lstrip(":")
                     return _CallableSymbol(
                         self.lisp,
                         str(result[2]),
                         optional_string(result[3]),
-                        kind,
                     )
                 case ":VALUE":
                     return decode_value(result[1], self.lisp)

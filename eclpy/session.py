@@ -232,7 +232,7 @@ def _read_host_file(
         path_bytes = memory.read(caller, path_ptr, path_ptr + path_len)
         path = Path(bytes(path_bytes).decode("utf-8"))
         data = path.read_bytes()
-    except OSError, UnicodeDecodeError, ValueError:
+    except (OSError, UnicodeDecodeError, ValueError):
         return WASI_ENOENT
 
     allocation_size = max(len(data), 1)
