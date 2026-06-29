@@ -10,6 +10,10 @@ calling functions, accessing packages, and converting common Lisp values to
 Python values. Normal users can start with ``eclpy.syntax``; heavier users can
 drop down to explicit ``SExp`` trees or the raw ``EclSession`` bridge.
 
+The bridge is bidirectional: Lisp code can also evaluate Python through
+``ecl-python:py-eval`` / ``py-exec``. Values cross the boundary as a single
+tagged JSON protocol.
+
 .. contents::
    :local:
    :depth: 2
@@ -121,10 +125,16 @@ The modules are split by layer:
 
 .. code-block:: text
 
-   eclpy/session.py   # WASM/ECL runtime bridge
-   eclpy/lisp.py      # Lisp object/session facade
-   eclpy/syntax.py    # SExp/literal builders
-   eclpy/proxy.py     # Pythonic package proxy
+   eclpy/lisp.py        # high-level Lisp facade and reference lifecycle
+   eclpy/proxy.py       # Pythonic package proxy
+   eclpy/syntax.py      # fluent SExp/literal builders
+   eclpy/sexp.py        # safe Lisp source rendering
+   eclpy/encode.py      # Python values -> Lisp source expressions
+   eclpy/protocol.py    # tagged JSON value protocol
+   eclpy/session.py     # low-level Wasmtime/ECL session
+   eclpy/hostenv.py     # WASM env imports: files, stat, Python eval/exec
+   eclpy/wasmmem.py     # WASM linear-memory helpers
+   eclpy/runtime.lisp   # Lisp-side helper package source
 
 For Heavy Users
 ===============
@@ -222,6 +232,30 @@ Conses and Proper Lists
        assert values == eclpy.List(1, 2)
        assert values.car == 1
        assert list(values) == [1, 2]
+
+Evaluate Python from Lisp
+-------------------------
+
+Every high-level ``Lisp`` session loads the ``ecl-python`` helper package. Lisp
+code can evaluate Python expressions with ``ecl-python:py-eval`` and execute
+Python statements with ``ecl-python:py-exec``:
+
+.. code-block:: python
+
+   import eclpy
+
+   with eclpy.Lisp() as lisp:
+       assert lisp.eval(eclpy.SExp.raw('(ecl-python:py-eval "1 + 2")')) == 3
+       assert lisp.eval(eclpy.SExp.raw('(ecl-python:py-exec "x = 5")')) == eclpy.List()
+       assert lisp.eval(eclpy.SExp.raw('(ecl-python:py-eval "x * 2")')) == 10
+       assert lisp.eval(eclpy.SExp.raw('(ecl-python:py-eval "[1, \\"x\\"]")')) == eclpy.List(1, "x")
+
+``py-eval`` accepts Python expressions and returns their value. ``py-exec``
+accepts Python statements and returns ``NIL``. The Python globals are scoped to
+the owning ``EclSession`` and persist for the session lifetime.
+
+This is a full-power host Python evaluation hook, not a sandbox. Only evaluate
+trusted code.
 
 ASDF
 ----
@@ -351,12 +385,104 @@ details:
    with eclpy.Lisp() as lisp:
        try:
            lisp.eval(eclpy.SExp.raw('(error "boom")'))
-       except eclpy.EclError as exc:
-           print(exc.condition_type)
-           print(exc.message)
+	       except eclpy.EclError as exc:
+	           print(exc.condition_type)
+	           print(exc.message)
+
+Security Model
+--------------
+
+``eclpy`` is designed for trusted local code. It is not a sandbox for
+untrusted Lisp or Python:
+
+* ``SExp.raw`` intentionally embeds raw Lisp source.
+* ``ecl-python:py-eval`` and ``py-exec`` run in the host Python interpreter with
+  normal Python privileges.
+* The ASDF/file bridge lets Lisp inspect and load ordinary host paths needed by
+  the current process.
+
+Do not expose these APIs directly to untrusted input without an application-level
+sandbox or allow-list.
 
 For Developers
 ==============
+
+Architecture
+------------
+
+The runtime is layered so that each boundary has one responsibility:
+
+.. code-block:: text
+
+   Python process
+   ├─ High-level API
+   │  ├─ lisp.py      Lisp facade, context manager, Reference lifecycle
+   │  ├─ proxy.py     package and callable-symbol proxies
+   │  └─ syntax.py    L.expr / L.quote / L.array helpers
+   ├─ Value and syntax
+   │  ├─ sexp.py      SExp tree -> safe Lisp source text
+   │  ├─ encode.py    Python values -> Lisp source expressions (call args)
+   │  ├─ protocol.py  tagged JSON protocol encode/decode
+   │  └─ objects.py   Symbol / List / Cons / Reference
+   ├─ Low-level host
+   │  ├─ session.py   Wasmtime lifecycle, eval, eval_json
+   │  ├─ hostenv.py   env imports: host files, stat, Python eval/exec
+   │  └─ wasmmem.py   linear-memory helpers and WASI errno
+   └─ WASM boundary
+      └─ native/eclpy_eval.c  ECL boot, C ABI, string shuttling
+
+   ECL inside WebAssembly
+   └─ eclpy/runtime.lisp      ecl-python helper package
+      ├─ evaluate / serialize / deserialize
+      ├─ json-encode / json-decode
+      ├─ py-eval / py-exec
+      └─ ASDF file bridge shims
+
+Value Protocol
+--------------
+
+Both directions use the same tagged JSON protocol. The Python side owns
+``protocol.py``; the Lisp side owns ``serialize`` / ``deserialize`` in
+``runtime.lisp``. The C layer does not parse JSON and does not interpret value
+tags; it only moves strings across the WASM boundary and calls Lisp helper
+functions.
+
+.. code-block:: text
+
+   Python value
+     -> protocol.to_protocol / json.dumps
+     -> JSON text
+     -> C string shuttle
+     -> ecl-python:json-decode
+     -> ecl-python:deserialize
+     -> Lisp value
+
+   Lisp value
+     -> ecl-python:serialize
+     -> ecl-python:json-encode
+     -> C string shuttle
+     -> json.loads / protocol.decode_value
+     -> Python value
+
+The wire shape is an array whose first element is a tag:
+
+.. code-block:: text
+
+   [":NIL"]
+   [":TRUE"]
+   [":INT", 42]
+   [":RATIO", 3, 2]
+   [":FLOAT", "1.5d0"]
+   [":STRING", "hello"]
+   [":SYMBOL", "CAR", "COMMON-LISP"]
+   [":LIST", [":INT", 1], [":STRING", "x"]]
+   [":DOTTED-LIST", [[":INT", 1]], [":INT", 2]]
+   [":VECTOR", ...]
+   [":PACKAGE", "COMMON-LISP"]
+   [":REF", 7, "FUNCTION"]
+
+Top-level Lisp results are wrapped as ``[":OK", value]`` or
+``[":ERROR", condition-type, message]``.
 
 Test
 ----
@@ -370,11 +496,11 @@ Test
    uv run coverage report -m
 
 The tests cover raw low-level evaluation, strict ``SExp`` evaluation, Syntax API
-shorthand evaluation, package lookup, macros and special forms,
-cons/list conversion, higher-order Lisp functions, reference lifecycle, result
-parsing, ``(require 'asdf)`` module loading, missing runtime errors, Lisp-side
-exceptions, and internal runtime error paths. Coverage is configured to fail
-below 100% for the Python package.
+shorthand evaluation, package lookup, macros and special forms, bidirectional
+Python/Lisp evaluation, tagged JSON protocol conversion, cons/list conversion,
+higher-order Lisp functions, reference lifecycle, ``(require 'asdf)`` module
+loading, missing runtime errors, Lisp-side exceptions, and internal runtime
+error paths. Coverage is configured to fail below 100% for the Python package.
 
 Build the WASM Runtime
 ----------------------
@@ -415,12 +541,14 @@ The wheel should contain:
    eclpy/lisp.py
    eclpy/syntax.py
    eclpy/proxy.py
-   eclpy/decode.py
+   eclpy/protocol.py
    eclpy/encode.py
    eclpy/session.py
+   eclpy/hostenv.py
+   eclpy/wasmmem.py
    eclpy/objects.py
-   eclpy/reader.py
    eclpy/runtime_lisp.py
+   eclpy/runtime.lisp
    eclpy/sexp.py
    eclpy/ecl_eval.wasm
    eclpy/asdf.lisp
