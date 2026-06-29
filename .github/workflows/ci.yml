@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Python checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Set up Emscripten
+        uses: emscripten-core/setup-emsdk@v16
+        with:
+          version: 6.0.1
+          actions-cache-folder: emsdk-cache
+
+      - name: Install dependencies
+        run: uv sync --locked --dev
+
+      - name: Verify Emscripten
+        run: emcc -v
+
+      - name: Build WebAssembly runtime
+        run: uv run python scripts/build_ecl_wasm.py
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Type check
+        run: uv run basedpyright
+
+      - name: Unit tests
+        run: uv run python -m unittest discover -s tests
+
+      - name: Coverage
+        run: |
+          uv run coverage run -m unittest discover -s tests
+          uv run coverage report -m

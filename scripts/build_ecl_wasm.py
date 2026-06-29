@@ -52,6 +52,13 @@ WASM_EH_FLAGS = (
 UNSUPPORTED_PRLIMIT64_WARNING = "unsupported syscall: __syscall_prlimit64"
 
 
+def emscripten_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env["EM_CACHE"] = str(BUILD / "emscripten-cache")
+    Path(env["EM_CACHE"]).mkdir(parents=True, exist_ok=True)
+    return env
+
+
 def run(*args: str, cwd: Path | None = None, env: dict[str, str] | None = None) -> None:
     where = f" cwd={cwd}" if cwd else ""
     print(f"+ {' '.join(args)}{where}", flush=True)
@@ -102,15 +109,13 @@ def build_wasm(host_ecl: Path, *, force: bool) -> Path:
     shutil.rmtree(WASM_PREFIX, ignore_errors=True)
 
     eh_flags = " ".join(WASM_EH_FLAGS)
-    env = os.environ.copy()
+    env = emscripten_env()
     env["ECL_TO_RUN"] = str(host_ecl)
     env["CC_FOR_BUILD"] = env.get("CC_FOR_BUILD") or shutil.which("cc") or "cc"
     env["CFLAGS"] = f"{env.get('CFLAGS') or '-O0'} {eh_flags}"
     env["CXXFLAGS"] = f"{env.get('CXXFLAGS') or '-O0'} {eh_flags}"
     env["LDFLAGS"] = f"{env.get('LDFLAGS', '')} {eh_flags}".strip()
     env["ac_cv_have_decl_RLIMIT_STACK"] = "no"
-    env["EM_CACHE"] = str(BUILD / "emscripten-cache")
-    Path(env["EM_CACHE"]).mkdir(parents=True, exist_ok=True)
 
     run(
         "emconfigure",
@@ -161,6 +166,7 @@ def link_wrapper() -> Path:
         "-sEXPORTED_RUNTIME_METHODS=[]",
         "-o",
         str(OUT_WASM),
+        env=emscripten_env(),
     )
     return OUT_WASM
 
