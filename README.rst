@@ -12,7 +12,7 @@ drop down to explicit ``SExp`` trees or the raw ``EclSession`` bridge.
 
 The bridge is bidirectional: Lisp code can also evaluate Python through
 ``ecl-python:py-eval`` / ``py-exec``. Values cross the boundary as a single
-tagged JSON protocol.
+object-shaped JSON protocol.
 
 .. contents::
    :local:
@@ -130,7 +130,7 @@ The modules are split by layer:
    eclpy/syntax.py      # fluent SExp/literal builders
    eclpy/sexp.py        # safe Lisp source rendering
    eclpy/encode.py      # Python values -> Lisp source expressions
-   eclpy/protocol.py    # tagged JSON value protocol
+   eclpy/protocol.py    # object-shaped JSON value protocol
    eclpy/session.py     # low-level Wasmtime/ECL session
    eclpy/hostenv.py     # WASM env imports: files, stat, Python eval/exec
    eclpy/wasmmem.py     # WASM linear-memory helpers
@@ -422,7 +422,7 @@ The runtime is layered so that each boundary has one responsibility:
    ├─ Value and syntax
    │  ├─ sexp.py      SExp tree -> safe Lisp source text
    │  ├─ encode.py    Python values -> Lisp source expressions (call args)
-   │  ├─ protocol.py  tagged JSON protocol encode/decode
+   │  ├─ protocol.py  object-shaped JSON protocol encode/decode
    │  └─ objects.py   Symbol / List / Cons / Reference
    ├─ Low-level host
    │  ├─ session.py   Wasmtime lifecycle, eval, eval_json
@@ -441,10 +441,10 @@ The runtime is layered so that each boundary has one responsibility:
 Value Protocol
 --------------
 
-Both directions use the same tagged JSON protocol. The Python side owns
+Both directions use the same object-shaped JSON protocol. The Python side owns
 ``protocol.py``; the Lisp side owns ``serialize`` / ``deserialize`` in
 ``runtime.lisp``. The C layer does not parse JSON and does not interpret value
-tags; it only moves strings across the WASM boundary and calls Lisp helper
+fields; it only moves strings across the WASM boundary and calls Lisp helper
 functions.
 
 .. code-block:: text
@@ -464,25 +464,44 @@ functions.
      -> json.loads / protocol.decode_value
      -> Python value
 
-The wire shape is an array whose first element is a tag:
+The wire shape is a JSON object with named fields. Every top-level Lisp result
+is a protocol envelope:
 
 .. code-block:: text
 
-   [":NIL"]
-   [":TRUE"]
-   [":INT", 42]
-   [":RATIO", 3, 2]
-   [":FLOAT", "1.5d0"]
-   [":STRING", "hello"]
-   [":SYMBOL", "CAR", "COMMON-LISP"]
-   [":LIST", [":INT", 1], [":STRING", "x"]]
-   [":DOTTED-LIST", [[":INT", 1]], [":INT", 2]]
-   [":VECTOR", ...]
-   [":PACKAGE", "COMMON-LISP"]
-   [":REF", 7, "FUNCTION"]
+   {"protocol": "eclpy", "version": 1, "status": "ok", "value": {...}}
+   {"protocol": "eclpy", "version": 1, "status": "error",
+    "condition_type": "SIMPLE-ERROR", "message": "boom"}
 
-Top-level Lisp results are wrapped as ``[":OK", value]`` or
-``[":ERROR", condition-type, message]``.
+Value nodes use a ``type`` field plus named payload fields:
+
+.. code-block:: text
+
+   {"type": "nil"}
+   {"type": "true"}
+   {"type": "int", "value": "42"}
+   {"type": "ratio", "numerator": "3", "denominator": "2"}
+   {"type": "float", "value": "1.5d0"}
+   {"type": "string", "value": "hello"}
+   {"type": "symbol", "name": "CAR", "package": "COMMON-LISP"}
+   {"type": "list", "items": [{"type": "int", "value": "1"}]}
+   {"type": "dotted-list", "items": [{"type": "int", "value": "1"}],
+    "tail": {"type": "int", "value": "2"}}
+   {"type": "vector", "items": [...]}
+   {"type": "package", "name": "COMMON-LISP"}
+   {"type": "ref", "id": 7, "kind": "FUNCTION"}
+
+Package lookup uses the same protocol/version envelope and returns exactly one
+of ``missing``, ``callable``, ``value``, or ``symbol``:
+
+.. code-block:: text
+
+   {"protocol": "eclpy", "version": 1, "kind": "missing"}
+   {"protocol": "eclpy", "version": 1, "kind": "callable",
+    "callable_type": "function", "name": "+", "package": "COMMON-LISP"}
+   {"protocol": "eclpy", "version": 1, "kind": "value", "value": {...}}
+   {"protocol": "eclpy", "version": 1, "kind": "symbol",
+    "name": "FOO", "package": null}
 
 Test
 ----
@@ -497,7 +516,7 @@ Test
 
 The tests cover raw low-level evaluation, strict ``SExp`` evaluation, Syntax API
 shorthand evaluation, package lookup, macros and special forms, bidirectional
-Python/Lisp evaluation, tagged JSON protocol conversion, cons/list conversion,
+Python/Lisp evaluation, object-shaped JSON protocol conversion, cons/list conversion,
 higher-order Lisp functions, reference lifecycle, ``(require 'asdf)`` module
 loading, missing runtime errors, Lisp-side exceptions, and internal runtime
 error paths. Coverage is configured to fail below 100% for the Python package.

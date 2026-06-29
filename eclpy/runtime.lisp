@@ -106,13 +106,45 @@
 
 (pushnew 'provide-asdf ext:*module-provider-functions*)
 
+(defconstant +protocol-name+ "eclpy")
+(defconstant +protocol-version+ 1)
+(defconstant +json-null+ :json-null)
+(defconstant +json-false+ :json-false)
+
+(defun json-field (key value)
+  (cons key value))
+
+(defun json-object (&rest fields)
+  (cons :object fields))
+
+(defun json-object-p (value)
+  (and (consp value) (eq (car value) :object)))
+
+(defun json-array (items)
+  (cons :array items))
+
+(defun json-array-p (value)
+  (and (consp value) (eq (car value) :array)))
+
+(defun protocol-field (key value)
+  (json-field key value))
+
+(defun protocol-envelope (&rest fields)
+  (apply #'json-object
+         (append (list (protocol-field "protocol" +protocol-name+)
+                       (protocol-field "version" +protocol-version+))
+                 fields)))
+
 (defun evaluate (thunk)
   (handler-case
-      (list :ok (serialize (funcall thunk)))
+      (protocol-envelope
+       (protocol-field "status" "ok")
+       (protocol-field "value" (serialize (funcall thunk))))
     (error (condition)
-      (list :error
-            (condition-type-name condition)
-            (condition-message condition)))))
+      (protocol-envelope
+       (protocol-field "status" "error")
+       (protocol-field "condition_type" (condition-type-name condition))
+       (protocol-field "message" (condition-message condition))))))
 
 (defun serialize-cons (value seen)
   (let ((items '())
@@ -120,11 +152,19 @@
     (loop
       (cond
         ((null tail)
-         (return (cons :list (nreverse items))))
+         (return (json-object
+                  (protocol-field "type" "list")
+                  (protocol-field "items" (json-array (nreverse items))))))
         ((not (consp tail))
-         (return (list :dotted-list (nreverse items) (serialize tail seen))))
+         (return (json-object
+                  (protocol-field "type" "dotted-list")
+                  (protocol-field "items" (json-array (nreverse items)))
+                  (protocol-field "tail" (serialize tail seen)))))
         ((gethash tail seen)
-         (return (list :ref (store-object value) "CONS")))
+         (return (json-object
+                  (protocol-field "type" "ref")
+                  (protocol-field "id" (store-object value))
+                  (protocol-field "kind" "CONS"))))
         (t
          (setf (gethash tail seen) t)
          (push (serialize (car tail) seen) items)
@@ -132,26 +172,58 @@
 
 (defun serialize (value &optional (seen (make-hash-table :test #'eq)))
   (cond
-    ((null value) '(:nil))
-    ((eq value t) '(:true))
-    ((integerp value) (list :int value))
-    ((rationalp value) (list :ratio (numerator value) (denominator value)))
-    ((floatp value) (list :float (format nil "~E" value)))
-    ((stringp value) (list :string value))
-    ((characterp value) (list :string (string value)))
+    ((null value) (json-object (protocol-field "type" "nil")))
+    ((eq value t) (json-object (protocol-field "type" "true")))
+    ((integerp value)
+     (json-object
+      (protocol-field "type" "int")
+      (protocol-field "value" (princ-to-string value))))
+    ((rationalp value)
+     (json-object
+      (protocol-field "type" "ratio")
+      (protocol-field "numerator" (princ-to-string (numerator value)))
+      (protocol-field "denominator" (princ-to-string (denominator value)))))
+    ((floatp value)
+     (json-object
+      (protocol-field "type" "float")
+      (protocol-field "value" (format nil "~E" value))))
+    ((stringp value)
+     (json-object
+      (protocol-field "type" "string")
+      (protocol-field "value" value)))
+    ((characterp value)
+     (json-object
+      (protocol-field "type" "string")
+      (protocol-field "value" (string value))))
     ((symbolp value)
-     (list :symbol
-           (symbol-name value)
-           (let ((package (symbol-package value)))
-             (and package (package-name package)))))
+     (json-object
+      (protocol-field "type" "symbol")
+      (protocol-field "name" (symbol-name value))
+      (protocol-field "package"
+                      (let ((package (symbol-package value)))
+                        (if package (package-name package) +json-null+)))))
     ((consp value) (serialize-cons value seen))
     ((vectorp value)
-     (cons :vector
-           (loop for index below (length value)
-                 collect (serialize (aref value index) seen))))
-    ((packagep value) (list :package (package-name value)))
-    ((functionp value) (list :ref (store-object value) "FUNCTION"))
-    (t (list :ref (store-object value) (prin1-to-string (type-of value))))))
+     (json-object
+      (protocol-field "type" "vector")
+      (protocol-field "items"
+                      (json-array
+                       (loop for index below (length value)
+                             collect (serialize (aref value index) seen))))))
+    ((packagep value)
+     (json-object
+      (protocol-field "type" "package")
+      (protocol-field "name" (package-name value))))
+    ((functionp value)
+     (json-object
+      (protocol-field "type" "ref")
+      (protocol-field "id" (store-object value))
+      (protocol-field "kind" "FUNCTION")))
+    (t
+     (json-object
+      (protocol-field "type" "ref")
+      (protocol-field "id" (store-object value))
+      (protocol-field "kind" (prin1-to-string (type-of value)))))))
 
 (defun json-escape-string (value)
   (with-output-to-string (out)
@@ -172,16 +244,25 @@
 
 (defun json-encode-value (value out)
   (cond
-    ((null value) (write-string "null" out))
+    ((eq value +json-null+) (write-string "null" out))
+    ((eq value +json-false+) (write-string "false" out))
     ((eq value t) (write-string "true" out))
-    ((keywordp value)
-     (write-string (json-escape-string (format nil ":~A" (symbol-name value))) out))
     ((integerp value) (princ value out))
     ((floatp value) (princ value out))
     ((stringp value) (write-string (json-escape-string value) out))
-    ((consp value)
+    ((json-object-p value)
+     (write-char #\{ out)
+     (loop for fields on (cdr value)
+           for field = (car fields)
+           for first = t then nil do
+       (unless first (write-char #\, out))
+       (write-string (json-escape-string (car field)) out)
+       (write-char #\: out)
+       (json-encode-value (cdr field) out))
+     (write-char #\} out))
+    ((json-array-p value)
      (write-char #\[ out)
-     (loop for tail on value
+     (loop for tail on (cdr value)
            for first = t then nil do
        (unless first (write-char #\, out))
        (json-encode-value (car tail) out))
@@ -254,7 +335,7 @@
   (incf index)
   (setf index (json-skip-ws source index))
   (when (and (< index (length source)) (char= (aref source index) #\]))
-    (return-from json-decode-array (values '() (1+ index))))
+    (return-from json-decode-array (values (json-array '()) (1+ index))))
   (let ((items '()))
     (loop
       (multiple-value-bind (item next-index) (json-decode-value source index)
@@ -267,8 +348,35 @@
           ((char= char #\,)
            (setf index (json-skip-ws source (1+ index))))
           ((char= char #\])
-           (return (values (nreverse items) (1+ index))))
+           (return (values (json-array (nreverse items)) (1+ index))))
           (t (error "Invalid JSON array separator: ~A" char)))))))
+
+(defun json-decode-object (source index)
+  (incf index)
+  (setf index (json-skip-ws source index))
+  (when (and (< index (length source)) (char= (aref source index) #\}))
+    (return-from json-decode-object (values (json-object) (1+ index))))
+  (let ((fields '()))
+    (loop
+      (unless (and (< index (length source)) (char= (aref source index) #\"))
+        (error "Expected JSON object key"))
+      (multiple-value-bind (key next-index) (json-decode-string source index)
+        (setf index (json-skip-ws source next-index))
+        (unless (and (< index (length source)) (char= (aref source index) #\:))
+          (error "Expected JSON object colon"))
+        (multiple-value-bind (value value-index)
+            (json-decode-value source (json-skip-ws source (1+ index)))
+          (push (json-field key value) fields)
+          (setf index (json-skip-ws source value-index))))
+      (when (>= index (length source))
+        (error "Unterminated JSON object"))
+      (let ((char (aref source index)))
+        (cond
+          ((char= char #\,)
+           (setf index (json-skip-ws source (1+ index))))
+          ((char= char #\})
+           (return (values (apply #'json-object (nreverse fields)) (1+ index))))
+          (t (error "Invalid JSON object separator: ~A" char)))))))
 
 (defun json-decode-value (source index)
   (setf index (json-skip-ws source index))
@@ -277,10 +385,11 @@
   (let ((char (aref source index)))
     (cond
       ((char= char #\[) (json-decode-array source index))
+      ((char= char #\{) (json-decode-object source index))
       ((char= char #\") (json-decode-string source index))
       ((json-prefix-p source index "true") (values t (+ index 4)))
-      ((json-prefix-p source index "false") (values nil (+ index 5)))
-      ((json-prefix-p source index "null") (values nil (+ index 4)))
+      ((json-prefix-p source index "false") (values +json-false+ (+ index 5)))
+      ((json-prefix-p source index "null") (values +json-null+ (+ index 4)))
       (t (json-decode-number source index)))))
 
 (defun json-decode (source)
@@ -290,64 +399,164 @@
       (error "Trailing data in JSON"))
     value)))
 
+(defun json-object-field (object key)
+  (unless (json-object-p object)
+    (error "Expected JSON object, got ~S" object))
+  (assoc key (cdr object) :test #'string=))
+
+(defun json-object-require (object key)
+  (let ((field (json-object-field object key)))
+    (unless field
+      (error "Missing JSON object field ~S in ~S" key object))
+    (cdr field)))
+
+(defun json-object-exact-keys (object keys)
+  (unless (json-object-p object)
+    (error "Expected JSON object, got ~S" object))
+  (dolist (field (cdr object))
+    (unless (member (car field) keys :test #'string=)
+      (error "Unexpected JSON object field ~S in ~S" (car field) object)))
+  (dolist (key keys)
+    (unless (json-object-field object key)
+      (error "Missing JSON object field ~S in ~S" key object))))
+
+(defun json-require-string (object key)
+  (let ((value (json-object-require object key)))
+    (unless (stringp value)
+      (error "Expected string field ~S, got ~S" key value))
+    value))
+
+(defun json-require-nullable-string (object key)
+  (let ((value (json-object-require object key)))
+    (cond
+      ((eq value +json-null+) nil)
+      ((stringp value) value)
+      (t (error "Expected string or null field ~S, got ~S" key value)))))
+
+(defun json-require-integer (object key)
+  (let ((value (json-object-require object key)))
+    (unless (integerp value)
+      (error "Expected integer field ~S, got ~S" key value))
+    value))
+
+(defun json-require-decimal-string (object key)
+  (let ((value (json-require-string object key)))
+    (unless (and (> (length value) 0)
+                 (or (every #'digit-char-p value)
+                     (and (char= (aref value 0) #\-)
+                          (> (length value) 1)
+                          (every #'digit-char-p (subseq value 1)))))
+      (error "Expected decimal string field ~S, got ~S" key value))
+    value))
+
+(defun json-require-array (object key)
+  (let ((value (json-object-require object key)))
+    (unless (json-array-p value)
+      (error "Expected array field ~S, got ~S" key value))
+    (cdr value)))
+
+(defun parse-decimal-string (text)
+  (parse-integer text :junk-allowed nil))
+
 (defun deserialize-list (items)
   (mapcar #'deserialize items))
 
-(defun protocol-tag (value)
-  (cond
-    ((keywordp value) value)
-    ((and (stringp value)
-          (> (length value) 0)
-          (char= (aref value 0) #\:))
-     (intern (subseq value 1) "KEYWORD"))
-    (t value)))
-
 (defun deserialize (node)
-  (unless (consp node)
+  (unless (json-object-p node)
     (error "Invalid eclpy protocol value: ~S" node))
-  (case (protocol-tag (first node))
-    (:nil nil)
-    (:true t)
-    (:int (second node))
-    (:ratio (/ (second node) (third node)))
-    (:float (read-from-string (second node)))
-    (:string (second node))
-    (:symbol (if (third node)
-                 (intern (second node) (third node))
-                 (make-symbol (second node))))
-    (:list (deserialize-list (rest node)))
-    (:dotted-list
-     (let ((tail (deserialize (third node))))
-       (dolist (item (reverse (second node)) tail)
-         (setf tail (cons (deserialize item) tail)))))
-    (:vector (coerce (deserialize-list (rest node)) 'vector))
-    (:package (find-package (second node)))
-    (:ref (value (second node)))
-    (otherwise (error "Unknown eclpy protocol tag: ~S" (first node)))))
+  (let ((type (json-require-string node "type")))
+    (cond
+      ((string= type "nil")
+       (json-object-exact-keys node '("type"))
+       nil)
+      ((string= type "true")
+       (json-object-exact-keys node '("type"))
+       t)
+      ((string= type "int")
+       (json-object-exact-keys node '("type" "value"))
+       (parse-decimal-string (json-require-decimal-string node "value")))
+      ((string= type "ratio")
+       (json-object-exact-keys node '("type" "numerator" "denominator"))
+       (/ (parse-decimal-string (json-require-decimal-string node "numerator"))
+          (parse-decimal-string (json-require-decimal-string node "denominator"))))
+      ((string= type "float")
+       (json-object-exact-keys node '("type" "value"))
+       (let ((*read-eval* nil))
+         (read-from-string (json-require-string node "value"))))
+      ((string= type "string")
+       (json-object-exact-keys node '("type" "value"))
+       (json-require-string node "value"))
+      ((string= type "symbol")
+       (json-object-exact-keys node '("type" "name" "package"))
+       (let ((name (json-require-string node "name"))
+             (package (json-require-nullable-string node "package")))
+         (if package
+             (intern name package)
+             (make-symbol name))))
+      ((string= type "list")
+       (json-object-exact-keys node '("type" "items"))
+       (deserialize-list (json-require-array node "items")))
+      ((string= type "dotted-list")
+       (json-object-exact-keys node '("type" "items" "tail"))
+       (let ((tail (deserialize (json-object-require node "tail"))))
+         (dolist (item (reverse (json-require-array node "items")) tail)
+           (setf tail (cons (deserialize item) tail)))))
+      ((string= type "vector")
+       (json-object-exact-keys node '("type" "items"))
+       (coerce (deserialize-list (json-require-array node "items")) 'vector))
+      ((string= type "package")
+       (json-object-exact-keys node '("type" "name"))
+       (find-package (json-require-string node "name")))
+      ((string= type "ref")
+       (json-object-exact-keys node '("type" "id" "kind"))
+       (value (json-require-integer node "id")))
+      (t (error "Unknown eclpy protocol type: ~S" type)))))
+
+(defun lookup-envelope (&rest fields)
+  (apply #'protocol-envelope fields))
 
 (defun lookup-symbol (package-name symbol-name)
   (let ((package (find-package package-name)))
     (unless package
-      (return-from lookup-symbol '(:missing)))
+      (return-from lookup-symbol
+        (lookup-envelope (protocol-field "kind" "missing"))))
     (multiple-value-bind (symbol status) (find-symbol symbol-name package)
       (declare (ignore status))
       (unless symbol
-        (return-from lookup-symbol '(:missing)))
+        (return-from lookup-symbol
+          (lookup-envelope (protocol-field "kind" "missing"))))
       (let ((symbol-package (symbol-package symbol)))
         (cond
           ((special-operator-p symbol)
-           (list :callable :special (symbol-name symbol)
-                 (and symbol-package (package-name symbol-package))))
+           (lookup-envelope
+            (protocol-field "kind" "callable")
+            (protocol-field "callable_type" "special")
+            (protocol-field "name" (symbol-name symbol))
+            (protocol-field "package"
+                            (if symbol-package (package-name symbol-package) +json-null+))))
           ((macro-function symbol)
-           (list :callable :macro (symbol-name symbol)
-                 (and symbol-package (package-name symbol-package))))
+           (lookup-envelope
+            (protocol-field "kind" "callable")
+            (protocol-field "callable_type" "macro")
+            (protocol-field "name" (symbol-name symbol))
+            (protocol-field "package"
+                            (if symbol-package (package-name symbol-package) +json-null+))))
           ((fboundp symbol)
-           (list :callable :function (symbol-name symbol)
-                 (and symbol-package (package-name symbol-package))))
+           (lookup-envelope
+            (protocol-field "kind" "callable")
+            (protocol-field "callable_type" "function")
+            (protocol-field "name" (symbol-name symbol))
+            (protocol-field "package"
+                            (if symbol-package (package-name symbol-package) +json-null+))))
           ((boundp symbol)
-           (list :value (serialize (symbol-value symbol))))
+           (lookup-envelope
+            (protocol-field "kind" "value")
+            (protocol-field "value" (serialize (symbol-value symbol)))))
           (t
-           (list :symbol (symbol-name symbol)
-                 (and symbol-package (package-name symbol-package)))))))))
+           (lookup-envelope
+            (protocol-field "kind" "symbol")
+            (protocol-field "name" (symbol-name symbol))
+            (protocol-field "package"
+                            (if symbol-package (package-name symbol-package) +json-null+)))))))))
 
 (in-package #:cl-user)

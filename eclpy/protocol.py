@@ -1,30 +1,15 @@
 """The JSON value protocol shared by Python and Lisp.
 
-Both directions of the bridge use a single tagged JSON schema. Each value is a
-JSON array whose first element is an uppercase tag and whose remaining elements
-are the payload::
+The bridge uses object-shaped JSON so every node can be validated by field name.
+Top-level ECL results are envelopes::
 
-    [":NIL"]                          Lisp NIL / Python None
-    [":TRUE"]                         Lisp T / Python True
-    [":INT", n]                       integer
-    [":RATIO", num, den]              rational
-    [":FLOAT", "1.5d0"]              float (Lisp-readable text)
-    [":STRING", s]                    string
-    [":SYMBOL", name, package|null]   symbol
-    [":LIST", item, ...]              proper list
-    [":DOTTED-LIST", [item, ...], t]  improper list with tail ``t``
-    [":VECTOR", item, ...]            vector
-    [":PACKAGE", name]                package
-    [":REF", id, type]                opaque handle to a Lisp object
+    {"protocol": "eclpy", "version": 1, "status": "ok", "value": {...}}
+    {"protocol": "eclpy", "version": 1, "status": "error",
+     "condition_type": "SIMPLE-ERROR", "message": "boom"}
 
-Top-level results are wrapped as ``[":OK", value]`` or
-``[":ERROR", type, message]``.
-
-This module owns the Python half of the protocol: :func:`decode_value` /
-:func:`decode_result` consume tagged JSON produced by Lisp, and
-:func:`to_protocol` / :func:`dump_value` produce tagged JSON for Lisp. The Lisp
-half lives in ``runtime_lisp`` (``serialize`` / ``deserialize``); the C layer
-only shuttles the structure to and from JSON text.
+Values use a ``type`` field plus named payload fields. The Lisp half lives in
+``runtime.lisp`` (``serialize`` / ``deserialize``); the C layer only shuttles
+JSON text across the WASM boundary.
 """
 
 from __future__ import annotations
@@ -32,162 +17,281 @@ from __future__ import annotations
 import json
 import math
 from fractions import Fraction
-from typing import Any
+from typing import Any, Literal, cast
 
 from .errors import EclError
 from .objects import Cons, List, Reference, Symbol
 
-_OK_VALUE_INDEX = 1
-_ERROR_MIN_FIELDS = 3
-_ERROR_CONDITION_INDEX = 1
-_ERROR_MESSAGE_INDEX = 2
+PROTOCOL_NAME = "eclpy"
+PROTOCOL_VERSION = 1
 
-
-# --- decode: tagged JSON structure -> Python value -------------------------
+_JSON_SCALAR = str | int | float | bool | None
+_JSON_VALUE = _JSON_SCALAR | list[Any] | dict[str, Any]
+_LookupKind = Literal["missing", "callable", "value", "symbol"]
 
 
 def decode_result(node: Any, lisp: Any) -> Any:
-    """Decode a top-level success or error wrapper from ECL."""
-    match node_tag(node):
-        case ":OK":
-            expect_len(node, 2)
-            return decode_value(node[_OK_VALUE_INDEX], lisp)
-        case ":ERROR":
-            if len(node) < _ERROR_MIN_FIELDS:
-                message = f"malformed ECL error result: {node!r}"
-                raise EclError(message)
-            condition_type = str(node[_ERROR_CONDITION_INDEX])
-            message = str(node[_ERROR_MESSAGE_INDEX])
-            raise EclError(message, condition_type=condition_type)
+    """Decode a top-level success or error envelope from ECL."""
+    envelope = _protocol_envelope(node)
+    status = _required_string(envelope, "status")
+    match status:
+        case "ok":
+            _expect_exact_keys(envelope, {"protocol", "version", "status", "value"}, "result")
+            return decode_value(envelope["value"], lisp)
+        case "error":
+            _expect_exact_keys(
+                envelope,
+                {"protocol", "version", "status", "condition_type", "message"},
+                "result",
+            )
+            raise EclError(
+                _required_string(envelope, "message"),
+                condition_type=_required_string(envelope, "condition_type"),
+            )
         case _:
-            message = f"expected ECL result wrapper, got {node!r}"
+            message = f"unknown ECL result status {status!r}"
             raise EclError(message)
+
+
+def decode_lookup(node: Any) -> dict[str, Any]:
+    """Validate a package lookup envelope produced by Lisp."""
+    envelope = _protocol_envelope(node)
+    kind = _required_string(envelope, "kind")
+    match kind:
+        case "missing":
+            _expect_exact_keys(envelope, {"protocol", "version", "kind"}, "lookup")
+        case "callable":
+            _expect_exact_keys(
+                envelope,
+                {"protocol", "version", "kind", "callable_type", "name", "package"},
+                "lookup",
+            )
+            _required_string(envelope, "callable_type")
+            _required_string(envelope, "name")
+            _optional_string(envelope, "package")
+        case "value":
+            _expect_exact_keys(envelope, {"protocol", "version", "kind", "value"}, "lookup")
+        case "symbol":
+            _expect_exact_keys(
+                envelope,
+                {"protocol", "version", "kind", "name", "package"},
+                "lookup",
+            )
+            _required_string(envelope, "name")
+            _optional_string(envelope, "package")
+        case _:
+            message = f"unknown ECL lookup kind {kind!r}"
+            raise EclError(message)
+    return envelope
 
 
 def decode_value(node: Any, lisp: Any) -> Any:
     """Decode one serialized Lisp value into its Python representation."""
-    if not isinstance(node, list):
-        message = f"expected serialized ECL value, got {node!r}"
-        raise EclError(message)
-    match tag := node_tag(node):
-        case ":NIL":
-            expect_len(node, 1)
+    value = _object_node(node, "value")
+    value_type = _required_string(value, "type")
+    match value_type:
+        case "nil":
+            _expect_exact_keys(value, {"type"}, "value")
             return List()
-        case ":TRUE":
-            expect_len(node, 1)
+        case "true":
+            _expect_exact_keys(value, {"type"}, "value")
             return True
-        case ":INT":
-            expect_len(node, 2)
-            return int(node[1])
-        case ":RATIO":
-            expect_len(node, 3)
-            return Fraction(int(node[1]), int(node[2]))
-        case ":FLOAT":
-            expect_len(node, 2)
-            return float(str(node[1]).replace("d", "e").replace("D", "E"))
-        case ":STRING":
-            expect_len(node, 2)
-            return str(node[1])
-        case ":SYMBOL":
-            expect_len(node, 3)
-            return Symbol(str(node[1]), optional_string(node[2]))
-        case ":LIST":
-            return List(*(decode_value(item, lisp) for item in node[1:]))
-        case ":DOTTED-LIST":
-            expect_len(node, 3)
-            items = [decode_value(item, lisp) for item in node[1]]
-            tail = decode_value(node[2], lisp)
-            for item in reversed(items):
-                tail = Cons(item, tail)
+        case "int":
+            _expect_exact_keys(value, {"type", "value"}, "value")
+            return int(_required_decimal_string(value, "value"))
+        case "ratio":
+            _expect_exact_keys(value, {"type", "numerator", "denominator"}, "value")
+            return Fraction(
+                int(_required_decimal_string(value, "numerator")),
+                int(_required_decimal_string(value, "denominator")),
+            )
+        case "float":
+            _expect_exact_keys(value, {"type", "value"}, "value")
+            return float(_required_string(value, "value").replace("d", "e").replace("D", "E"))
+        case "string":
+            _expect_exact_keys(value, {"type", "value"}, "value")
+            return _required_string(value, "value")
+        case "symbol":
+            _expect_exact_keys(value, {"type", "name", "package"}, "value")
+            return Symbol(_required_string(value, "name"), _optional_string(value, "package"))
+        case "list":
+            _expect_exact_keys(value, {"type", "items"}, "value")
+            return List(*(decode_value(item, lisp) for item in _required_list(value, "items")))
+        case "dotted-list":
+            _expect_exact_keys(value, {"type", "items", "tail"}, "value")
+            tail = decode_value(value["tail"], lisp)
+            for item in reversed(_required_list(value, "items")):
+                tail = Cons(decode_value(item, lisp), tail)
             return tail
-        case ":VECTOR":
-            return [decode_value(item, lisp) for item in node[1:]]
-        case ":PACKAGE":
-            expect_len(node, 2)
+        case "vector":
+            _expect_exact_keys(value, {"type", "items"}, "value")
+            return [decode_value(item, lisp) for item in _required_list(value, "items")]
+        case "package":
+            _expect_exact_keys(value, {"type", "name"}, "value")
             from .proxy import find_package
 
-            return find_package(lisp, str(node[1]))
-        case ":REF":
-            expect_len(node, 3)
-            return lisp._make_reference(int(node[1]), str(node[2]))
+            return find_package(lisp, _required_string(value, "name"))
+        case "ref":
+            _expect_exact_keys(value, {"type", "id", "kind"}, "value")
+            return lisp._make_reference(_required_int(value, "id"), _required_string(value, "kind"))
         case _:
-            message = f"unknown ECL serialization tag {tag}"
+            message = f"unknown ECL value type {value_type!r}"
             raise EclError(message)
 
 
-def node_tag(node: Any) -> str:
-    """Return the tag atom for a serialized ECL node."""
-    if not isinstance(node, list) or not node:
-        message = f"expected tagged ECL value, got {node!r}"
-        raise EclError(message)
-    return symbol_atom(node[0])
-
-
-def symbol_atom(value: Any) -> str:
-    """Return a serialized symbol atom as a string."""
-    if not isinstance(value, str):
-        message = f"expected ECL symbol atom, got {value!r}"
-        raise EclError(message)
-    return value
-
-
-def optional_string(value: Any) -> str | None:
-    """Decode JSON null values as ``None`` and other values as strings."""
-    if value is None:
-        return None
-    return str(value)
-
-
-def expect_len(node: list[Any], length: int) -> None:
-    """Raise when a serialized node does not have the expected length."""
-    if len(node) != length:
-        message = f"malformed ECL tagged value: {node!r}"
-        raise EclError(message)
-
-
-# --- encode: Python value -> tagged JSON structure -------------------------
-
-
 def dump_value(value: Any) -> str:
-    """Encode a Python value as tagged JSON text for the Lisp side."""
+    """Encode a Python value as JSON text for the Lisp side."""
     return json.dumps(to_protocol(value), ensure_ascii=False)
 
 
-def to_protocol(value: Any) -> Any:
-    """Convert a Python value into the tagged protocol structure."""
+def to_protocol(value: Any) -> dict[str, _JSON_VALUE]:
+    """Convert a Python value into the object-shaped protocol structure."""
     match value:
         case None:
-            return [":NIL"]
+            return {"type": "nil"}
         case bool():
-            return [":TRUE"] if value else [":NIL"]
+            return {"type": "true"} if value else {"type": "nil"}
         case int():
-            return [":INT", value]
+            return {"type": "int", "value": str(value)}
         case Fraction() as ratio:
-            return [":RATIO", ratio.numerator, ratio.denominator]
+            return {
+                "type": "ratio",
+                "numerator": str(ratio.numerator),
+                "denominator": str(ratio.denominator),
+            }
         case float() as number:
-            return [":FLOAT", _float_text(number)]
+            return {"type": "float", "value": _float_text(number)}
         case str() as text:
-            return [":STRING", text]
+            return {"type": "string", "value": text}
         case Symbol() as symbol:
-            return [":SYMBOL", symbol.name, symbol.package]
+            return {"type": "symbol", "name": symbol.name, "package": symbol.package}
         case Cons() as cons:
-            return [":DOTTED-LIST", [to_protocol(cons.car)], to_protocol(cons.cdr)]
+            return {
+                "type": "dotted-list",
+                "items": [to_protocol(cons.car)],
+                "tail": to_protocol(cons.cdr),
+            }
         case (List() | tuple() | list()) as items:
-            return [":LIST", *(to_protocol(item) for item in items)]
+            return {"type": "list", "items": [to_protocol(item) for item in items]}
         case dict() as mapping:
-            pairs = (
-                [":DOTTED-LIST", [to_protocol(key)], to_protocol(item)]
+            pairs = [
+                {
+                    "type": "dotted-list",
+                    "items": [to_protocol(key)],
+                    "tail": to_protocol(item),
+                }
                 for key, item in mapping.items()
-            )
-            return [":LIST", *pairs]
+            ]
+            return {"type": "list", "items": pairs}
         case Reference() as reference:
             if reference.released:
                 message = "cannot pass a released Lisp reference"
                 raise EclError(message)
-            return [":REF", reference.object_id, reference.type_name]
+            return {"type": "ref", "id": reference.object_id, "kind": reference.type_name}
         case _:
             message = f"cannot convert {type(value).__name__} to the eclpy JSON protocol"
             raise TypeError(message)
+
+
+def lookup_kind(node: dict[str, Any]) -> _LookupKind:
+    """Return the validated lookup kind."""
+    kind = _required_string(node, "kind")
+    if kind in {"missing", "callable", "value", "symbol"}:
+        return cast(_LookupKind, kind)
+    message = f"unknown ECL lookup kind {kind!r}"
+    raise EclError(message)
+
+
+def lookup_string(node: dict[str, Any], key: str) -> str:
+    """Return a required string field from a validated lookup envelope."""
+    return _required_string(node, key)
+
+
+def lookup_optional_string(node: dict[str, Any], key: str) -> str | None:
+    """Return an optional string field from a validated lookup envelope."""
+    return _optional_string(node, key)
+
+
+def _protocol_envelope(node: Any) -> dict[str, Any]:
+    envelope = _object_node(node, "protocol envelope")
+    _expect_protocol(envelope)
+    return envelope
+
+
+def _expect_protocol(node: dict[str, Any]) -> None:
+    if node.get("protocol") != PROTOCOL_NAME:
+        message = f"expected eclpy protocol envelope, got {node!r}"
+        raise EclError(message)
+    if node.get("version") != PROTOCOL_VERSION:
+        message = f"unsupported eclpy protocol version {node.get('version')!r}"
+        raise EclError(message)
+
+
+def _object_node(node: Any, context: str) -> dict[str, Any]:
+    if not isinstance(node, dict):
+        message = f"expected {context} object, got {node!r}"
+        raise EclError(message)
+    if not all(isinstance(key, str) for key in node):
+        message = f"expected string keys in {context} object, got {node!r}"
+        raise EclError(message)
+    return node
+
+
+def _expect_exact_keys(node: dict[str, Any], expected: set[str], context: str) -> None:
+    actual = set(node)
+    if actual != expected:
+        message = f"malformed ECL {context}: expected keys {sorted(expected)}, got {sorted(actual)}"
+        raise EclError(message)
+
+
+def _required_string(node: dict[str, Any], key: str) -> str:
+    value = _required(node, key)
+    if not isinstance(value, str):
+        message = f"expected string field {key!r}, got {value!r}"
+        raise EclError(message)
+    return value
+
+
+def _optional_string(node: dict[str, Any], key: str) -> str | None:
+    value = _required(node, key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        message = f"expected string or null field {key!r}, got {value!r}"
+        raise EclError(message)
+    return value
+
+
+def _required_list(node: dict[str, Any], key: str) -> list[Any]:
+    value = _required(node, key)
+    if not isinstance(value, list):
+        message = f"expected list field {key!r}, got {value!r}"
+        raise EclError(message)
+    return value
+
+
+def _required_int(node: dict[str, Any], key: str) -> int:
+    value = _required(node, key)
+    if not isinstance(value, int) or isinstance(value, bool):
+        message = f"expected integer field {key!r}, got {value!r}"
+        raise EclError(message)
+    return value
+
+
+def _required_decimal_string(node: dict[str, Any], key: str) -> str:
+    value = _required_string(node, key)
+    digits = value[1:] if value.startswith("-") else value
+    if not digits or not digits.isdecimal():
+        message = f"expected decimal string field {key!r}, got {value!r}"
+        raise EclError(message)
+    return value
+
+
+def _required(node: dict[str, Any], key: str) -> Any:
+    if key not in node:
+        message = f"missing required field {key!r}"
+        raise EclError(message)
+    return node[key]
 
 
 def _float_text(value: float) -> str:

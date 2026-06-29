@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import threading
@@ -395,21 +396,38 @@ class SessionInternalsTests(unittest.TestCase):
                 is_error = int.from_bytes(memory.data[72:76], "little", signed=True)
                 return status, memory.data[out_ptr : out_ptr + out_len], is_error
 
+            def decoded_value(data: bytes) -> object:
+                return json.loads(data.decode("utf-8"))
+
             status, result, is_error = run_eval("1 + 2", MutableFakeMemory(size=512))
-            self.assertEqual((status, result, is_error), (0, b'[":INT", 3]', 0))
+            self.assertEqual(
+                (status, decoded_value(result), is_error), (0, {"type": "int", "value": "3"}, 0)
+            )
 
             status, result, is_error = run_eval("x = 41", MutableFakeMemory(size=512))
             self.assertEqual((status, is_error), (0, 1))
             self.assertIn(b"SyntaxError", result)
 
             status, result, is_error = run_exec("x = 41", MutableFakeMemory(size=512))
-            self.assertEqual((status, result, is_error), (0, b'[":NIL"]', 0))
+            self.assertEqual((status, decoded_value(result), is_error), (0, {"type": "nil"}, 0))
             status, result, is_error = run_eval("x + 1", MutableFakeMemory(size=512))
-            self.assertEqual((status, result, is_error), (0, b'[":INT", 42]', 0))
+            self.assertEqual(
+                (status, decoded_value(result), is_error), (0, {"type": "int", "value": "42"}, 0)
+            )
             status, result, is_error = run_eval("[1, 'x']", MutableFakeMemory(size=512))
             self.assertEqual(
-                (status, result, is_error),
-                (0, b'[":LIST", [":INT", 1], [":STRING", "x"]]', 0),
+                (status, decoded_value(result), is_error),
+                (
+                    0,
+                    {
+                        "type": "list",
+                        "items": [
+                            {"type": "int", "value": "1"},
+                            {"type": "string", "value": "x"},
+                        ],
+                    },
+                    0,
+                ),
             )
 
             status, result, is_error = run_eval("1 / 0", MutableFakeMemory(size=512))
@@ -439,7 +457,8 @@ class SessionInternalsTests(unittest.TestCase):
             out_ptr = int.from_bytes(memory.data[64:68], "little", signed=True)
             out_len = int.from_bytes(memory.data[68:72], "little", signed=True)
             self.assertEqual(
-                (status, memory.data[out_ptr : out_ptr + out_len]), (0, b'[":INT", 32]')
+                (status, json.loads(memory.data[out_ptr : out_ptr + out_len].decode("utf-8"))),
+                (0, {"type": "int", "value": "32"}),
             )
 
             exec_memory = MutableFakeMemory(b"z = 99", size=512)
@@ -454,7 +473,10 @@ class SessionInternalsTests(unittest.TestCase):
             self.assertEqual(exec_callback(exec_caller, 0, 6, 64, 68, 72), 0)
             out_ptr = int.from_bytes(exec_memory.data[64:68], "little", signed=True)
             out_len = int.from_bytes(exec_memory.data[68:72], "little", signed=True)
-            self.assertEqual(exec_memory.data[out_ptr : out_ptr + out_len], b'[":NIL"]')
+            self.assertEqual(
+                json.loads(exec_memory.data[out_ptr : out_ptr + out_len].decode("utf-8")),
+                {"type": "nil"},
+            )
 
 
 if __name__ == "__main__":

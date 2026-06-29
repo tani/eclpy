@@ -7,7 +7,13 @@ from typing import TYPE_CHECKING, Any
 
 from .encode import to_syntax_api_expr
 from .objects import Symbol
-from .protocol import decode_value, node_tag, optional_string
+from .protocol import (
+    decode_lookup,
+    decode_value,
+    lookup_kind,
+    lookup_optional_string,
+    lookup_string,
+)
 from .sexp import SExp
 
 if TYPE_CHECKING:
@@ -71,20 +77,23 @@ class Package:
                 SExp.string(self.name),
                 SExp.string(symbol_name),
             )
-            result = self.lisp._eval_helper(form)
-            match node_tag(result):
-                case ":MISSING":
+            result = decode_lookup(self.lisp._eval_helper(form))
+            match lookup_kind(result):
+                case "missing":
                     continue
-                case ":CALLABLE":
+                case "callable":
                     return _CallableSymbol(
                         self.lisp,
-                        str(result[2]),
-                        optional_string(result[3]),
+                        lookup_string(result, "name"),
+                        lookup_optional_string(result, "package"),
                     )
-                case ":VALUE":
-                    return decode_value(result[1], self.lisp)
-                case ":SYMBOL":
-                    return Symbol(str(result[1]), optional_string(result[2]))
+                case "value":
+                    return decode_value(result["value"], self.lisp)
+                case "symbol":
+                    return Symbol(
+                        lookup_string(result, "name"),
+                        lookup_optional_string(result, "package"),
+                    )
         raise AttributeError(attribute)
 
     def __repr__(self) -> str:
