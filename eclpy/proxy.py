@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from .decode import decode_value, node_tag, optional_string
 from .encode import to_syntax_api_expr
 from .objects import Symbol
+from .protocol import decode_value, node_tag, optional_string
 from .sexp import SExp
 
 if TYPE_CHECKING:

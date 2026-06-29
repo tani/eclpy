@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 
 from eclpy import EclError, Lisp, Reference, SExp, Symbol
-from eclpy.decode import decode_value
+from eclpy.protocol import decode_value
 from eclpy.proxy import Package, _attribute_candidates
 
 

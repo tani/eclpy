@@ -7,9 +7,9 @@ from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
 
-from .decode import decode_result
 from .errors import EclError
 from .objects import Reference
+from .protocol import decode_result
 from .runtime_lisp import HELPER_SOURCE
 from .session import EclSession
 from .sexp import SExp

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import builtins
-import json
 import stat as stat_module
 import struct
 from pathlib import Path
@@ -11,6 +10,7 @@ from typing import Any
 
 import wasmtime
 
+from .protocol import dump_value
 from .wasmmem import (
     WASI_EINVAL,
     WASI_ENOENT,
@@ -114,10 +114,10 @@ def run_python(
         source = bytes(wasm_memory.read(caller, src_ptr, src_ptr + src_len)).decode("utf-8")
         code = builtins.compile(source, "<ecl-python>", mode)
         if mode == "eval":
-            result = json.dumps(builtins.eval(code, py_globals), allow_nan=False)
+            result = dump_value(builtins.eval(code, py_globals))
         else:
             exec(code, py_globals)
-            result = "null"
+            result = dump_value(None)
     except Exception as exc:
         is_error = 1
         result = f"{type(exc).__name__}: {exc}"

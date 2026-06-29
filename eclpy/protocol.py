@@ -1,17 +1,49 @@
-"""Decode Lisp values serialized by the ECL helper package."""
+"""The JSON value protocol shared by Python and Lisp.
+
+Both directions of the bridge use a single tagged JSON schema. Each value is a
+JSON array whose first element is an uppercase tag and whose remaining elements
+are the payload::
+
+    [":NIL"]                          Lisp NIL / Python None
+    [":TRUE"]                         Lisp T / Python True
+    [":INT", n]                       integer
+    [":RATIO", num, den]              rational
+    [":FLOAT", "1.5d0"]              float (Lisp-readable text)
+    [":STRING", s]                    string
+    [":SYMBOL", name, package|null]   symbol
+    [":LIST", item, ...]              proper list
+    [":DOTTED-LIST", [item, ...], t]  improper list with tail ``t``
+    [":VECTOR", item, ...]            vector
+    [":PACKAGE", name]                package
+    [":REF", id, type]                opaque handle to a Lisp object
+
+Top-level results are wrapped as ``[":OK", value]`` or
+``[":ERROR", type, message]``.
+
+This module owns the Python half of the protocol: :func:`decode_value` /
+:func:`decode_result` consume tagged JSON produced by Lisp, and
+:func:`to_protocol` / :func:`dump_value` produce tagged JSON for Lisp. The Lisp
+half lives in ``runtime_lisp`` (``serialize`` / ``deserialize``); the C layer
+only shuttles the structure to and from JSON text.
+"""
 
 from __future__ import annotations
 
+import json
+import math
 from fractions import Fraction
 from typing import Any
 
 from .errors import EclError
-from .objects import Cons, List, Symbol
+from .objects import Cons, List, Reference, Symbol
 
 _OK_VALUE_INDEX = 1
 _ERROR_MIN_FIELDS = 3
 _ERROR_CONDITION_INDEX = 1
 _ERROR_MESSAGE_INDEX = 2
+
+
+# --- decode: tagged JSON structure -> Python value -------------------------
 
 
 def decode_result(node: Any, lisp: Any) -> Any:
@@ -111,3 +143,55 @@ def expect_len(node: list[Any], length: int) -> None:
     if len(node) != length:
         message = f"malformed ECL tagged value: {node!r}"
         raise EclError(message)
+
+
+# --- encode: Python value -> tagged JSON structure -------------------------
+
+
+def dump_value(value: Any) -> str:
+    """Encode a Python value as tagged JSON text for the Lisp side."""
+    return json.dumps(to_protocol(value), ensure_ascii=False)
+
+
+def to_protocol(value: Any) -> Any:
+    """Convert a Python value into the tagged protocol structure."""
+    match value:
+        case None:
+            return [":NIL"]
+        case bool():
+            return [":TRUE"] if value else [":NIL"]
+        case int():
+            return [":INT", value]
+        case Fraction() as ratio:
+            return [":RATIO", ratio.numerator, ratio.denominator]
+        case float() as number:
+            return [":FLOAT", _float_text(number)]
+        case str() as text:
+            return [":STRING", text]
+        case Symbol() as symbol:
+            return [":SYMBOL", symbol.name, symbol.package]
+        case Cons() as cons:
+            return [":DOTTED-LIST", [to_protocol(cons.car)], to_protocol(cons.cdr)]
+        case (List() | tuple() | list()) as items:
+            return [":LIST", *(to_protocol(item) for item in items)]
+        case dict() as mapping:
+            pairs = (
+                [":DOTTED-LIST", [to_protocol(key)], to_protocol(item)]
+                for key, item in mapping.items()
+            )
+            return [":LIST", *pairs]
+        case Reference() as reference:
+            if reference.released:
+                message = "cannot pass a released Lisp reference"
+                raise EclError(message)
+            return [":REF", reference.object_id, reference.type_name]
+        case _:
+            message = f"cannot convert {type(value).__name__} to the eclpy JSON protocol"
+            raise TypeError(message)
+
+
+def _float_text(value: float) -> str:
+    if not math.isfinite(value):
+        message = "cannot convert a non-finite float to the eclpy JSON protocol"
+        raise TypeError(message)
+    return repr(value)

@@ -396,18 +396,21 @@ class SessionInternalsTests(unittest.TestCase):
                 return status, memory.data[out_ptr : out_ptr + out_len], is_error
 
             status, result, is_error = run_eval("1 + 2", MutableFakeMemory(size=512))
-            self.assertEqual((status, result, is_error), (0, b"3", 0))
+            self.assertEqual((status, result, is_error), (0, b'[":INT", 3]', 0))
 
             status, result, is_error = run_eval("x = 41", MutableFakeMemory(size=512))
             self.assertEqual((status, is_error), (0, 1))
             self.assertIn(b"SyntaxError", result)
 
             status, result, is_error = run_exec("x = 41", MutableFakeMemory(size=512))
-            self.assertEqual((status, result, is_error), (0, b"null", 0))
+            self.assertEqual((status, result, is_error), (0, b'[":NIL"]', 0))
             status, result, is_error = run_eval("x + 1", MutableFakeMemory(size=512))
-            self.assertEqual((status, result, is_error), (0, b"42", 0))
+            self.assertEqual((status, result, is_error), (0, b'[":INT", 42]', 0))
             status, result, is_error = run_eval("[1, 'x']", MutableFakeMemory(size=512))
-            self.assertEqual((status, result, is_error), (0, b'[1, "x"]', 0))
+            self.assertEqual(
+                (status, result, is_error),
+                (0, b'[":LIST", [":INT", 1], [":STRING", "x"]]', 0),
+            )
 
             status, result, is_error = run_eval("1 / 0", MutableFakeMemory(size=512))
             self.assertEqual((status, is_error), (0, 1))
@@ -435,7 +438,9 @@ class SessionInternalsTests(unittest.TestCase):
             status = callback(caller, 0, 6, 64, 68, 72)
             out_ptr = int.from_bytes(memory.data[64:68], "little", signed=True)
             out_len = int.from_bytes(memory.data[68:72], "little", signed=True)
-            self.assertEqual((status, memory.data[out_ptr : out_ptr + out_len]), (0, b"32"))
+            self.assertEqual(
+                (status, memory.data[out_ptr : out_ptr + out_len]), (0, b'[":INT", 32]')
+            )
 
             exec_memory = MutableFakeMemory(b"z = 99", size=512)
             exec_caller = FakeCaller(
@@ -449,7 +454,7 @@ class SessionInternalsTests(unittest.TestCase):
             self.assertEqual(exec_callback(exec_caller, 0, 6, 64, 68, 72), 0)
             out_ptr = int.from_bytes(exec_memory.data[64:68], "little", signed=True)
             out_len = int.from_bytes(exec_memory.data[68:72], "little", signed=True)
-            self.assertEqual(exec_memory.data[out_ptr : out_ptr + out_len], b"null")
+            self.assertEqual(exec_memory.data[out_ptr : out_ptr + out_len], b'[":NIL"]')
 
 
 if __name__ == "__main__":

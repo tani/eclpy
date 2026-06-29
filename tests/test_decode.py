@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import unittest
 from fractions import Fraction
+from math import inf
 
-from eclpy import Cons, EclError, List, Package, Symbol
-from eclpy.decode import (
+from eclpy import Cons, EclError, List, Package, Reference, Symbol
+from eclpy.protocol import (
     decode_result,
     decode_value,
+    dump_value,
     expect_len,
     node_tag,
     optional_string,
     symbol_atom,
+    to_protocol,
 )
 
 
@@ -68,6 +71,34 @@ class DecodeTests(unittest.TestCase):
         self.assertIsNone(optional_string(None))
         with self.assertRaisesRegex(EclError, "malformed ECL tagged value"):
             expect_len([":INT"], 2)
+
+    def test_encode_python_values_to_protocol(self) -> None:
+        self.assertEqual(to_protocol(None), [":NIL"])
+        self.assertEqual(to_protocol(False), [":NIL"])
+        self.assertEqual(to_protocol(True), [":TRUE"])
+        self.assertEqual(to_protocol(12), [":INT", 12])
+        self.assertEqual(to_protocol(Fraction(5, 3)), [":RATIO", 5, 3])
+        self.assertEqual(to_protocol(1.25), [":FLOAT", "1.25"])
+        self.assertEqual(to_protocol("abc"), [":STRING", "abc"])
+        self.assertEqual(to_protocol(Symbol("FOO", "CL")), [":SYMBOL", "FOO", "CL"])
+        self.assertEqual(to_protocol(List(1, "x")), [":LIST", [":INT", 1], [":STRING", "x"]])
+        self.assertEqual(
+            to_protocol(Cons(1, 2)),
+            [":DOTTED-LIST", [[":INT", 1]], [":INT", 2]],
+        )
+        self.assertEqual(
+            to_protocol({"a": 1}),
+            [":LIST", [":DOTTED-LIST", [[":STRING", "a"]], [":INT", 1]]],
+        )
+        self.assertEqual(dump_value([1, "x"]), '[":LIST", [":INT", 1], [":STRING", "x"]]')
+        self.assertEqual(to_protocol(Reference(None, 7, "FUNCTION")), [":REF", 7, "FUNCTION"])
+
+        with self.assertRaisesRegex(EclError, "released Lisp reference"):
+            to_protocol(Reference(None, 7, "FUNCTION", released=True))
+        with self.assertRaisesRegex(TypeError, "non-finite float"):
+            to_protocol(inf)
+        with self.assertRaisesRegex(TypeError, "cannot convert object"):
+            to_protocol(object())
 
 
 if __name__ == "__main__":
