@@ -14,8 +14,6 @@ BUILD = ROOT / "build"
 ECL_DIR = "ecl-26.5.5"
 VENDORED_ECL = ROOT / "vendor" / ECL_DIR
 WRAPPER = ROOT / "native" / "eclpy_eval.c"
-JSON_BRIDGE = ROOT / "native" / "eclpy_json.c"
-JSON_BRIDGE_HEADER = ROOT / "native" / "eclpy_json.h"
 
 HOST_SRC = BUILD / "ecl-host-src"
 WASM_SRC = BUILD / "ecl-wasm-src"
@@ -149,7 +147,6 @@ def link_wrapper() -> Path:
     run(
         "emcc",
         str(WRAPPER),
-        str(JSON_BRIDGE),
         f"-I{include_root()}",
         *libs,
         "-O0",
@@ -240,12 +237,6 @@ def main() -> None:
         raise SystemExit(message)
     if not WRAPPER.is_file():
         message = f"missing required file: {WRAPPER}"
-        raise SystemExit(message)
-    if not JSON_BRIDGE.is_file():
-        message = f"missing required file: {JSON_BRIDGE}"
-        raise SystemExit(message)
-    if not JSON_BRIDGE_HEADER.is_file():
-        message = f"missing required file: {JSON_BRIDGE_HEADER}"
         raise SystemExit(message)
 
     build_wasm(build_host(force=args.force), force=args.force or args.force_wasm)

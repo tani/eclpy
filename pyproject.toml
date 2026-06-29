@@ -21,10 +21,12 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["eclpy"]
 artifacts = ["eclpy/ecl_eval.wasm", "eclpy/asdf.lisp"]
+force-include = { "eclpy/runtime.lisp" = "eclpy/runtime.lisp" }
 
 [tool.hatch.build.targets.sdist.force-include]
 "eclpy/ecl_eval.wasm" = "eclpy/ecl_eval.wasm"
 "eclpy/asdf.lisp" = "eclpy/asdf.lisp"
+"eclpy/runtime.lisp" = "eclpy/runtime.lisp"
 
 [tool.hatch.build.hooks.custom]
 path = "scripts/hatch_build.py"

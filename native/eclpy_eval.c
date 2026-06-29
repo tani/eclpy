@@ -3,8 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "eclpy_json.h"
-
 static int eclpy_booted = 0;
 static char *eclpy_error = NULL;
 
@@ -152,10 +150,10 @@ static cl_object eclpy_call_python(cl_object source, eclpy_python_bridge callbac
         free(data);
         FEerror("Python ~A failed: ~A", 2, ecl_make_simple_base_string(operation, -1), message);
     }
-    /* The host returns the value encoded as JSON. */
-    cl_object value = eclpy_json_to_value(data, data_len);
+    /* The helper package owns JSON decoding and protocol deserialization. */
+    cl_object json = ecl_make_simple_base_string(data, data_len);
     free(data);
-    return value;
+    return json;
 }
 
 static cl_object eclpy_py_eval(cl_object source) {
@@ -269,7 +267,10 @@ char *eclpy_eval_json(const char *source, int32_t source_len) {
     ECL_CATCH_ALL_BEGIN(env) {
         int saw_form = 0;
         cl_object result = eclpy_eval_forms(source, source_len, ECL_NIL, &saw_form);
-        output = eclpy_value_to_json_cstring(saw_form ? result : ECL_NIL);
+        cl_object value = saw_form ? result : ECL_NIL;
+        cl_object json = cl_funcall(2, ecl_read_from_cstring("ecl-python:json-encode"), value);
+        cl_object base = si_coerce_to_base_string(json);
+        output = eclpy_strdup(ecl_base_string_pointer_safe(base));
         if (output == NULL) {
             eclpy_set_error("failed to allocate JSON result buffer");
         }
