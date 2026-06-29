@@ -20,6 +20,18 @@ __attribute__((import_module("env"), import_name("eclpy_stat")))
 extern int32_t eclpy_stat(const char *path, int32_t path_len, int32_t *out_kind,
                           double *out_mtime);
 
+#ifdef __wasm__
+__attribute__((import_module("env"), import_name("eclpy_eval_python")))
+#endif
+extern int32_t eclpy_eval_python(const char *source, int32_t source_len, char **out_data,
+                                 int32_t *out_len, int32_t *out_is_error);
+
+#ifdef __wasm__
+__attribute__((import_module("env"), import_name("eclpy_exec_python")))
+#endif
+extern int32_t eclpy_exec_python(const char *source, int32_t source_len, char **out_data,
+                                 int32_t *out_len, int32_t *out_is_error);
+
 /* Seconds between the Common Lisp universal-time epoch (1900) and the Unix epoch. */
 #define ECLPY_UNIX_TO_UNIVERSAL 2208988800LL
 
@@ -115,6 +127,40 @@ static cl_object eclpy_host_stat(cl_object source) {
     return CONS(ecl_make_keyword(kind == 2 ? "DIRECTORY" : "FILE"), date);
 }
 
+static cl_object eclpy_call_python(
+    cl_object source,
+    int32_t (*callback)(const char *, int32_t, char **, int32_t *, int32_t *),
+    const char *operation) {
+    cl_object base = si_coerce_to_base_string(source);
+    const char *code = ecl_base_string_pointer_safe(base);
+    int32_t code_len = (int32_t)strlen(code);
+    char *data = NULL;
+    int32_t data_len = 0;
+    int32_t is_error = 0;
+
+    int32_t status = callback(code, code_len, &data, &data_len, &is_error);
+    if (status != 0 || data == NULL || data_len < 0) {
+        FEerror("Python ~A bridge failed with status ~A.", 2,
+                ecl_make_simple_base_string(operation, -1),
+                ecl_make_integer(status));
+    }
+
+    cl_object result = ecl_make_simple_base_string(data, data_len);
+    free(data);
+    if (is_error != 0) {
+        FEerror("Python ~A failed: ~A", 2, ecl_make_simple_base_string(operation, -1), result);
+    }
+    return result;
+}
+
+static cl_object eclpy_py_eval(cl_object source) {
+    return eclpy_call_python(source, eclpy_eval_python, "eval");
+}
+
+static cl_object eclpy_py_exec(cl_object source) {
+    return eclpy_call_python(source, eclpy_exec_python, "exec");
+}
+
 void *eclpy_alloc(int32_t size) {
     if (size <= 0) {
         return NULL;
@@ -161,6 +207,10 @@ int32_t eclpy_init(void) {
                        (cl_objectfn_fixed)eclpy_native_load, 5);
     ecl_def_c_function(ecl_read_from_cstring("ecl-python:host-stat"),
                        (cl_objectfn_fixed)eclpy_host_stat, 1);
+    ecl_def_c_function(ecl_read_from_cstring("ecl-python::%py-eval"),
+                       (cl_objectfn_fixed)eclpy_py_eval, 1);
+    ecl_def_c_function(ecl_read_from_cstring("ecl-python::%py-exec"),
+                       (cl_objectfn_fixed)eclpy_py_exec, 1);
     eclpy_booted = 1;
     return 0;
 }

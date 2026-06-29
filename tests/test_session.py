@@ -89,6 +89,10 @@ class EclSessionTests(unittest.TestCase):
         self.assertEqual(completed.stdout.strip(), "3")
         self.assertNotIn(UNSUPPORTED_PRLIMIT64_WARNING, completed.stderr)
 
+    def test_low_level_session_can_eval_python_code(self) -> None:
+        with EclSession(require_wasm()) as ecl:
+            self.assertEqual(ecl.eval('(ecl-python::%py-eval "1 + 2")'), '"3"')
+
 
 class LispApiTests(unittest.TestCase):
     def test_lisp_eval_accepts_explicit_sexp_only(self) -> None:
@@ -178,6 +182,28 @@ class LispApiTests(unittest.TestCase):
                 self.assertRaisesRegex(EclError, "boom while loading"),
             ):
                 lisp.eval(SExp.raw(f"(load #p{SExp.string(str(source))})"))
+
+    def test_lisp_can_eval_python_code(self) -> None:
+        with Lisp(require_wasm()) as lisp:
+            self.assertEqual(lisp.eval(SExp.raw('(ecl-python::%py-eval "1 + 2")')), "3")
+            self.assertEqual(lisp.eval(SExp.raw('(ecl-python::%py-exec "x = 5")')), "")
+            self.assertEqual(lisp.eval(SExp.raw('(ecl-python::%py-eval "x * 2")')), "10")
+            with self.assertRaisesRegex(EclError, "SyntaxError"):
+                lisp.eval(SExp.raw('(ecl-python::%py-eval "y = 5")'))
+
+    def test_lisp_can_handle_python_eval_errors(self) -> None:
+        with Lisp(require_wasm()) as lisp:
+            with self.assertRaisesRegex(EclError, "ZeroDivisionError"):
+                lisp.eval(SExp.raw('(ecl-python::%py-eval "1 / 0")'))
+            self.assertIn(
+                "Python eval failed",
+                lisp.eval(
+                    SExp.raw(
+                        '(handler-case (ecl-python::%py-eval "1 / 0") '
+                        '(error (condition) (format nil "~A" condition)))'
+                    )
+                ),
+            )
 
     def test_require_asdf(self) -> None:
         require_asdf_source()

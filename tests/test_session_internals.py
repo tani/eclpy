@@ -298,7 +298,7 @@ class SessionInternalsTests(unittest.TestCase):
         )()
         linker = FakeLinker()
         with patch.object(session.wasmtime, "FuncType", FakeFuncType):
-            session._define_emscripten_imports(linker, module)
+            session._define_emscripten_imports(linker, module, {"__builtins__": __builtins__})
         self.assertEqual([item[1] for item in linker.defined], ["invoke_ii", "regular"])
 
     def test_env_import_and_syscall_helpers(self) -> None:
@@ -337,6 +337,94 @@ class SessionInternalsTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(EclError, "does not export memory"):
                 session._memory(FakeCaller())
+
+    def test_eval_python_import(self) -> None:
+        with patch.multiple(session.wasmtime, Func=FakeFunc, Memory=MutableFakeMemory):
+            py_globals: dict[str, object] = {"__builtins__": __builtins__}
+
+            self.assertEqual(
+                session._eval_python(FakeCaller(), py_globals, 0, -1, 64, 68, 72),
+                session.WASI_EINVAL,
+            )
+
+            self.assertEqual(
+                session._eval_python(
+                    FakeCaller({"memory": MutableFakeMemory()}), py_globals, 0, 0, 64, 68, 72
+                ),
+                session.WASI_ENOSYS,
+            )
+
+            def run_eval(source: str, memory: MutableFakeMemory, malloc_ptr: int = 256):
+                memory.data[: len(source.encode())] = source.encode()
+                caller = FakeCaller(
+                    {"memory": memory, "malloc": FakeFunc(lambda caller, size: malloc_ptr)}
+                )
+                status = session._eval_python(
+                    caller, py_globals, 0, len(source.encode()), 64, 68, 72
+                )
+                out_ptr = int.from_bytes(memory.data[64:68], "little", signed=True)
+                out_len = int.from_bytes(memory.data[68:72], "little", signed=True)
+                is_error = int.from_bytes(memory.data[72:76], "little", signed=True)
+                return status, memory.data[out_ptr : out_ptr + out_len], is_error
+
+            def run_exec(source: str, memory: MutableFakeMemory, malloc_ptr: int = 256):
+                memory.data[: len(source.encode())] = source.encode()
+                caller = FakeCaller(
+                    {"memory": memory, "malloc": FakeFunc(lambda caller, size: malloc_ptr)}
+                )
+                status = session._exec_python(
+                    caller, py_globals, 0, len(source.encode()), 64, 68, 72
+                )
+                out_ptr = int.from_bytes(memory.data[64:68], "little", signed=True)
+                out_len = int.from_bytes(memory.data[68:72], "little", signed=True)
+                is_error = int.from_bytes(memory.data[72:76], "little", signed=True)
+                return status, memory.data[out_ptr : out_ptr + out_len], is_error
+
+            status, result, is_error = run_eval("1 + 2", MutableFakeMemory(size=512))
+            self.assertEqual((status, result, is_error), (0, b"3", 0))
+
+            status, result, is_error = run_eval("x = 41", MutableFakeMemory(size=512))
+            self.assertEqual((status, is_error), (0, 1))
+            self.assertIn(b"SyntaxError", result)
+
+            status, result, is_error = run_exec("x = 41", MutableFakeMemory(size=512))
+            self.assertEqual((status, result, is_error), (0, b"", 0))
+            status, result, is_error = run_eval("x + 1", MutableFakeMemory(size=512))
+            self.assertEqual((status, result, is_error), (0, b"42", 0))
+
+            status, result, is_error = run_eval("1 / 0", MutableFakeMemory(size=512))
+            self.assertEqual((status, is_error), (0, 1))
+            self.assertIn(b"ZeroDivisionError", result)
+
+            failed_alloc = MutableFakeMemory(size=512)
+            failed_alloc.data[:5] = b"1 + 2"
+            caller = FakeCaller(
+                {"memory": failed_alloc, "malloc": FakeFunc(lambda caller, size: 0)}
+            )
+            self.assertEqual(
+                session._eval_python(caller, py_globals, 0, 5, 64, 68, 72),
+                session.WASI_ENOSYS,
+            )
+
+    def test_eval_python_default_globals(self) -> None:
+        with patch.multiple(session.wasmtime, Func=FakeFunc, Memory=MutableFakeMemory):
+            memory = MutableFakeMemory(b"2 ** 5", size=512)
+            caller = FakeCaller({"memory": memory, "malloc": FakeFunc(lambda caller, size: 256)})
+            callback = session._env_import("eclpy_eval_python", has_result=True)
+            status = callback(caller, 0, 6, 64, 68, 72)
+            out_ptr = int.from_bytes(memory.data[64:68], "little", signed=True)
+            out_len = int.from_bytes(memory.data[68:72], "little", signed=True)
+            self.assertEqual((status, memory.data[out_ptr : out_ptr + out_len]), (0, b"32"))
+
+            exec_memory = MutableFakeMemory(b"z = 99", size=512)
+            exec_caller = FakeCaller(
+                {"memory": exec_memory, "malloc": FakeFunc(lambda caller, size: 256)}
+            )
+            exec_callback = session._env_import("eclpy_exec_python", has_result=True)
+            self.assertEqual(exec_callback(exec_caller, 0, 6, 64, 68, 72), 0)
+            out_ptr = int.from_bytes(exec_memory.data[64:68], "little", signed=True)
+            out_len = int.from_bytes(exec_memory.data[68:72], "little", signed=True)
+            self.assertEqual(exec_memory.data[out_ptr : out_ptr + out_len], b"")
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import os
 import stat as stat_module
 import struct
@@ -59,7 +60,8 @@ class EclSession:
         module = wasmtime.Module.from_file(self._engine, self.wasm_path)
         linker = wasmtime.Linker(self._engine)
         linker.define_wasi()
-        _define_emscripten_imports(linker, module)
+        self._py_globals: dict[str, Any] = {"__builtins__": builtins}
+        _define_emscripten_imports(linker, module, self._py_globals)
 
         try:
             self._instance = linker.instantiate(self._store, module)
@@ -177,7 +179,11 @@ def _export(exports: Any, name: str, expected_type: type[Any]) -> Any:
     return value
 
 
-def _define_emscripten_imports(linker: wasmtime.Linker, module: wasmtime.Module) -> None:
+def _define_emscripten_imports(
+    linker: wasmtime.Linker,
+    module: wasmtime.Module,
+    py_globals: dict[str, Any],
+) -> None:
     seen: set[str] = set()
     for item in module.imports:
         name = item.name
@@ -188,17 +194,30 @@ def _define_emscripten_imports(linker: wasmtime.Linker, module: wasmtime.Module)
             and isinstance(item.type, wasmtime.FuncType)
         ):
             seen.add(name)
-            callback = _env_import(name, has_result=bool(list(item.type.results)))
+            callback = _env_import(
+                name,
+                has_result=bool(list(item.type.results)),
+                py_globals=py_globals,
+            )
             linker.define_func("env", name, item.type, callback, access_caller=True)
 
 
-def _env_import(name: str, *, has_result: bool) -> Callable[..., Any]:
+def _env_import(
+    name: str,
+    *,
+    has_result: bool,
+    py_globals: dict[str, Any] | None = None,
+) -> Callable[..., Any]:
     def callback(caller: wasmtime.Caller, *args: int) -> Any:
         match name:
             case "eclpy_read_file":
                 return _read_host_file(caller, *args)
             case "eclpy_stat":
                 return _stat_host_file(caller, *args)
+            case "eclpy_eval_python":
+                return _eval_python(caller, _ensure_globals(py_globals), *args)
+            case "eclpy_exec_python":
+                return _exec_python(caller, _ensure_globals(py_globals), *args)
             case "emscripten_notify_memory_growth":
                 return None
             case "_emscripten_system":
@@ -211,6 +230,63 @@ def _env_import(name: str, *, has_result: bool) -> Callable[..., Any]:
                 return -WASI_ENOSYS if has_result else None
 
     return callback
+
+
+def _ensure_globals(py_globals: dict[str, Any] | None) -> dict[str, Any]:
+    return py_globals if py_globals is not None else {"__builtins__": builtins}
+
+
+def _eval_python(caller: wasmtime.Caller, py_globals: dict[str, Any], *args: int) -> int:
+    return _run_python(caller, py_globals, "eval", *args)
+
+
+def _exec_python(caller: wasmtime.Caller, py_globals: dict[str, Any], *args: int) -> int:
+    return _run_python(caller, py_globals, "exec", *args)
+
+
+def _run_python(
+    caller: wasmtime.Caller,
+    py_globals: dict[str, Any],
+    mode: str,
+    src_ptr: int,
+    src_len: int,
+    out_data_ptr: int,
+    out_len_ptr: int,
+    out_is_error_ptr: int,
+) -> int:
+    if src_len < 0:
+        return WASI_EINVAL
+
+    memory = _memory(caller)
+    malloc = caller.get("malloc")
+    if not isinstance(malloc, wasmtime.Func):
+        return WASI_ENOSYS
+
+    is_error = 0
+    try:
+        source = bytes(memory.read(caller, src_ptr, src_ptr + src_len)).decode("utf-8")
+        code = builtins.compile(source, "<ecl-python>", mode)
+        if mode == "eval":
+            result = repr(builtins.eval(code, py_globals))
+        else:
+            exec(code, py_globals)
+            result = ""
+    except Exception as exc:
+        is_error = 1
+        result = f"{type(exc).__name__}: {exc}"
+
+    data = result.encode("utf-8")
+    allocation_size = max(len(data), 1)
+    data_ptr = malloc(caller, allocation_size)
+    if not isinstance(data_ptr, int) or data_ptr == 0:
+        return WASI_ENOSYS
+
+    if data:
+        memory.write(caller, data, data_ptr)
+    _write_i32(memory, caller, out_data_ptr, data_ptr)
+    _write_i32(memory, caller, out_len_ptr, len(data))
+    _write_i32(memory, caller, out_is_error_ptr, is_error)
+    return 0
 
 
 def _read_host_file(
