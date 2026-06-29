@@ -108,6 +108,7 @@ def build_wasm(host_ecl: Path, *, force: bool) -> Path:
     env["CFLAGS"] = f"{env.get('CFLAGS') or '-O0'} {eh_flags}"
     env["CXXFLAGS"] = f"{env.get('CXXFLAGS') or '-O0'} {eh_flags}"
     env["LDFLAGS"] = f"{env.get('LDFLAGS', '')} {eh_flags}".strip()
+    env["ac_cv_have_decl_RLIMIT_STACK"] = "no"
     env["EM_CACHE"] = str(BUILD / "emscripten-cache")
     Path(env["EM_CACHE"]).mkdir(parents=True, exist_ok=True)
 
