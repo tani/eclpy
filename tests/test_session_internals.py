@@ -388,9 +388,11 @@ class SessionInternalsTests(unittest.TestCase):
             self.assertIn(b"SyntaxError", result)
 
             status, result, is_error = run_exec("x = 41", MutableFakeMemory(size=512))
-            self.assertEqual((status, result, is_error), (0, b"", 0))
+            self.assertEqual((status, result, is_error), (0, b"nil", 0))
             status, result, is_error = run_eval("x + 1", MutableFakeMemory(size=512))
             self.assertEqual((status, result, is_error), (0, b"42", 0))
+            status, result, is_error = run_eval("[1, 'x']", MutableFakeMemory(size=512))
+            self.assertEqual((status, result, is_error), (0, b'(1 "x")', 0))
 
             status, result, is_error = run_eval("1 / 0", MutableFakeMemory(size=512))
             self.assertEqual((status, is_error), (0, 1))
@@ -424,7 +426,7 @@ class SessionInternalsTests(unittest.TestCase):
             self.assertEqual(exec_callback(exec_caller, 0, 6, 64, 68, 72), 0)
             out_ptr = int.from_bytes(exec_memory.data[64:68], "little", signed=True)
             out_len = int.from_bytes(exec_memory.data[68:72], "little", signed=True)
-            self.assertEqual(exec_memory.data[out_ptr : out_ptr + out_len], b"")
+            self.assertEqual(exec_memory.data[out_ptr : out_ptr + out_len], b"nil")
 
 
 if __name__ == "__main__":

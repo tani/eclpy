@@ -267,10 +267,12 @@ def _run_python(
         source = bytes(memory.read(caller, src_ptr, src_ptr + src_len)).decode("utf-8")
         code = builtins.compile(source, "<ecl-python>", mode)
         if mode == "eval":
-            result = repr(builtins.eval(code, py_globals))
+            from .encode import to_lisp_literal
+
+            result = to_lisp_literal(builtins.eval(code, py_globals))
         else:
             exec(code, py_globals)
-            result = ""
+            result = "nil"
     except Exception as exc:
         is_error = 1
         result = f"{type(exc).__name__}: {exc}"

@@ -91,7 +91,7 @@ class EclSessionTests(unittest.TestCase):
 
     def test_low_level_session_can_eval_python_code(self) -> None:
         with EclSession(require_wasm()) as ecl:
-            self.assertEqual(ecl.eval('(ecl-python::%py-eval "1 + 2")'), '"3"')
+            self.assertEqual(ecl.eval('(ecl-python::%py-eval "1 + 2")'), "3")
 
 
 class LispApiTests(unittest.TestCase):
@@ -185,9 +185,13 @@ class LispApiTests(unittest.TestCase):
 
     def test_lisp_can_eval_python_code(self) -> None:
         with Lisp(require_wasm()) as lisp:
-            self.assertEqual(lisp.eval(SExp.raw('(ecl-python::%py-eval "1 + 2")')), "3")
-            self.assertEqual(lisp.eval(SExp.raw('(ecl-python::%py-exec "x = 5")')), "")
-            self.assertEqual(lisp.eval(SExp.raw('(ecl-python::%py-eval "x * 2")')), "10")
+            self.assertEqual(lisp.eval(SExp.raw('(ecl-python::%py-eval "1 + 2")')), 3)
+            self.assertEqual(lisp.eval(SExp.raw('(ecl-python::%py-exec "x = 5")')), List())
+            self.assertEqual(lisp.eval(SExp.raw('(ecl-python::%py-eval "x * 2")')), 10)
+            self.assertEqual(
+                lisp.eval(SExp.raw('(ecl-python::%py-eval "[1, \\"x\\"]")')),
+                List(1, "x"),
+            )
             with self.assertRaisesRegex(EclError, "SyntaxError"):
                 lisp.eval(SExp.raw('(ecl-python::%py-eval "y = 5")'))
 

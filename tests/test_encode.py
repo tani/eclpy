@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import unittest
 from fractions import Fraction
+from math import inf
 
 from eclpy import Cons, EclError, List, Reference, SExp, Symbol
-from eclpy.encode import keyword_parts, to_data_expr, to_syntax_expr
+from eclpy.encode import keyword_parts, to_data_expr, to_lisp_literal, to_syntax_expr
 
 
 class Package:
@@ -51,6 +52,25 @@ class EncodeTests(unittest.TestCase):
             to_data_expr(Reference(None, 7, "OBJECT", released=True))
         with self.assertRaisesRegex(TypeError, "cannot convert object"):
             to_data_expr(object())
+
+    def test_to_lisp_literal_converts_python_values(self) -> None:
+        self.assertEqual(to_lisp_literal(None), "nil")
+        self.assertEqual(to_lisp_literal(False), "nil")
+        self.assertEqual(to_lisp_literal(True), "t")
+        self.assertEqual(to_lisp_literal(12), "12")
+        self.assertEqual(to_lisp_literal(Fraction(5, 3)), "5/3")
+        self.assertEqual(to_lisp_literal(1.5), "1.5d0")
+        self.assertEqual(to_lisp_literal(1e6), "1000000.0d0")
+        self.assertEqual(to_lisp_literal(1e16), "1d+16")
+        self.assertEqual(to_lisp_literal("foo"), '"foo"')
+        self.assertEqual(to_lisp_literal([1, "x"]), '(1 "x")')
+        self.assertEqual(to_lisp_literal((1, 2)), "(1 2)")
+        self.assertEqual(to_lisp_literal({"a": 1}), '(("a" . 1))')
+
+        with self.assertRaisesRegex(TypeError, "non-finite float"):
+            to_lisp_literal(inf)
+        with self.assertRaisesRegex(TypeError, "cannot convert object"):
+            to_lisp_literal(object())
 
     def test_keyword_parts_converts_values_by_mode(self) -> None:
         self.assertEqual(

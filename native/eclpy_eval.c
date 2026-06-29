@@ -127,10 +127,10 @@ static cl_object eclpy_host_stat(cl_object source) {
     return CONS(ecl_make_keyword(kind == 2 ? "DIRECTORY" : "FILE"), date);
 }
 
-static cl_object eclpy_call_python(
-    cl_object source,
-    int32_t (*callback)(const char *, int32_t, char **, int32_t *, int32_t *),
-    const char *operation) {
+typedef int32_t (*eclpy_python_bridge)(const char *, int32_t, char **, int32_t *, int32_t *);
+
+static cl_object eclpy_call_python(cl_object source, eclpy_python_bridge callback,
+                                   const char *operation) {
     cl_object base = si_coerce_to_base_string(source);
     const char *code = ecl_base_string_pointer_safe(base);
     int32_t code_len = (int32_t)strlen(code);
@@ -145,12 +145,13 @@ static cl_object eclpy_call_python(
                 ecl_make_integer(status));
     }
 
-    cl_object result = ecl_make_simple_base_string(data, data_len);
+    cl_object payload = ecl_make_simple_base_string(data, data_len);
     free(data);
     if (is_error != 0) {
-        FEerror("Python ~A failed: ~A", 2, ecl_make_simple_base_string(operation, -1), result);
+        FEerror("Python ~A failed: ~A", 2, ecl_make_simple_base_string(operation, -1), payload);
     }
-    return result;
+    /* The host returns readable Lisp source for the native value (or NIL). */
+    return si_string_to_object(1, payload);
 }
 
 static cl_object eclpy_py_eval(cl_object source) {
