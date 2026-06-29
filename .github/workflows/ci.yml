@@ -34,24 +34,24 @@ jobs:
           actions-cache-folder: emsdk-cache
 
       - name: Install dependencies
-        run: uv sync --locked --dev
+        run: uv sync --locked --dev --no-install-project
 
       - name: Verify Emscripten
         run: emcc -v
 
       - name: Build WebAssembly runtime
-        run: uv run python scripts/build_ecl_wasm.py
+        run: uv run --no-sync python scripts/build_ecl_wasm.py
 
       - name: Lint
-        run: uv run ruff check .
+        run: uv run --no-sync ruff check .
 
       - name: Type check
-        run: uv run basedpyright
+        run: uv run --no-sync basedpyright
 
       - name: Unit tests
-        run: uv run python -m unittest discover -s tests
+        run: uv run --no-sync python -m unittest discover -s tests
 
       - name: Coverage
         run: |
-          uv run coverage run -m unittest discover -s tests
-          uv run coverage report -m
+          uv run --no-sync coverage run -m unittest discover -s tests
+          uv run --no-sync coverage report -m
