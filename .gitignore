@@ -3,6 +3,7 @@ __pycache__/
 *.py[oc]
 build/
 dist/
+emsdk-cache/
 wheels/
 *.egg-info
 .pytest_cache/
