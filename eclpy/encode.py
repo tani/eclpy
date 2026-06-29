@@ -2,55 +2,26 @@
 
 from __future__ import annotations
 
-import math
 from fractions import Fraction
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
+from .errors import EclError
 from .objects import Cons, List, Reference, Symbol
-from .session import EclError
 from .sexp import SExp
 
 
-def to_lisp_literal(value: Any) -> str:
-    """Render a Python value as readable Lisp source for its native value.
+@runtime_checkable
+class _CallableSymbolLike(Protocol):
+    name: str
+    package: str | None
 
-    Unlike :func:`to_data_expr`, the result is meant to be read (not evaluated)
-    by the Lisp reader, so it reconstructs the corresponding Lisp value directly.
-    """
-    match value:
-        case None:
-            return "nil"
-        case bool():
-            return "t" if value else "nil"
-        case int():
-            return str(value)
-        case Fraction() as ratio:
-            return f"{ratio.numerator}/{ratio.denominator}"
-        case float() as number:
-            return _lisp_double(number)
-        case str() as text:
-            return str(SExp.string(text))
-        case (list() | tuple()) as items:
-            return "(" + " ".join(to_lisp_literal(item) for item in items) + ")"
-        case dict() as mapping:
-            pairs = " ".join(
-                f"({to_lisp_literal(key)} . {to_lisp_literal(item)})"
-                for key, item in mapping.items()
-            )
-            return "(" + pairs + ")"
-        case _:
-            message = f"cannot convert {type(value).__name__} to a Lisp value"
-            raise TypeError(message)
+    def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
-def _lisp_double(value: float) -> str:
-    if not math.isfinite(value):
-        message = "cannot convert a non-finite float to a Lisp value"
-        raise TypeError(message)
-    text = repr(value)
-    if "e" in text or "E" in text:
-        return text.replace("E", "e").replace("e", "d")
-    return text + "d0"
+@runtime_checkable
+class _PackageLike(Protocol):
+    lisp: Any
+    name: str
 
 
 def to_syntax_expr(value: Any) -> SExp:
@@ -184,16 +155,8 @@ def keyword_parts(kwargs: dict[str, Any], *, values_as_expr: bool) -> list[SExp]
 
 
 def _is_callable_symbol(value: Any) -> bool:
-    return (
-        value.__class__.__name__ == "_CallableSymbol"
-        and hasattr(value, "name")
-        and hasattr(value, "package")
-    )
+    return isinstance(value, _CallableSymbolLike)
 
 
 def _is_package(value: Any) -> bool:
-    return (
-        value.__class__.__name__ == "Package"
-        and hasattr(value, "lisp")
-        and hasattr(value, "name")
-    )
+    return isinstance(value, _PackageLike)

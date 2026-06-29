@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from eclpy import EclError, EclSession, session
+from eclpy import EclError, EclSession, hostenv, session, wasmmem
 
 
 def fake_engine(config: object = None) -> object:
@@ -102,9 +102,9 @@ class SessionInternalsTests(unittest.TestCase):
             session._export({}, "missing", FakeFunc)
 
     def test_read_c_string(self) -> None:
-        self.assertEqual(session._read_c_string(FakeMemory(), object(), 0), "")
-        self.assertEqual(session._read_c_string(FakeMemory(b"\xffab\0tail"), object(), 0), "")
-        self.assertEqual(session._read_c_string(FakeMemory(b"xxhi\0tail"), object(), 2), "hi")
+        self.assertEqual(wasmmem.read_c_string(FakeMemory(), object(), 0), "")
+        self.assertEqual(wasmmem.read_c_string(FakeMemory(b"\xffab\0tail"), object(), 0), "")
+        self.assertEqual(wasmmem.read_c_string(FakeMemory(b"xxhi\0tail"), object(), 2), "hi")
 
     def test_read_host_file_import(self) -> None:
         with (
@@ -116,13 +116,13 @@ class SessionInternalsTests(unittest.TestCase):
             ),
         ):
             self.assertEqual(
-                session._read_host_file(FakeCaller(), 0, -1, 32, 36),
-                session.WASI_EINVAL,
+                hostenv.read_host_file(FakeCaller(), 0, -1, 32, 36),
+                wasmmem.WASI_EINVAL,
             )
 
             self.assertEqual(
-                session._read_host_file(FakeCaller({"memory": MutableFakeMemory()}), 0, 0, 32, 36),
-                session.WASI_ENOSYS,
+                hostenv.read_host_file(FakeCaller({"memory": MutableFakeMemory()}), 0, 0, 32, 36),
+                wasmmem.WASI_ENOSYS,
             )
 
             path = Path(directory) / "source.lisp"
@@ -130,7 +130,7 @@ class SessionInternalsTests(unittest.TestCase):
 
             memory = MutableFakeMemory(str(path).encode(), size=512)
             caller = FakeCaller({"memory": memory, "malloc": FakeFunc(lambda caller, size: 128)})
-            status = session._read_host_file(caller, 0, len(str(path)), 32, 36)
+            status = hostenv.read_host_file(caller, 0, len(str(path)), 32, 36)
 
             self.assertEqual(status, 0)
             self.assertEqual(memory.data[32:36], (128).to_bytes(4, "little", signed=True))
@@ -142,8 +142,8 @@ class SessionInternalsTests(unittest.TestCase):
                 {"memory": missing, "malloc": FakeFunc(lambda caller, size: 64)}
             )
             self.assertEqual(
-                session._read_host_file(missing_caller, 0, len("/missing.lisp"), 32, 36),
-                session.WASI_ENOENT,
+                hostenv.read_host_file(missing_caller, 0, len("/missing.lisp"), 32, 36),
+                wasmmem.WASI_ENOENT,
             )
 
             failed_allocation = MutableFakeMemory(str(path).encode(), size=128)
@@ -151,8 +151,8 @@ class SessionInternalsTests(unittest.TestCase):
                 {"memory": failed_allocation, "malloc": FakeFunc(lambda caller, size: 0)}
             )
             self.assertEqual(
-                session._read_host_file(failed_allocation_caller, 0, len(str(path)), 32, 36),
-                session.WASI_ENOSYS,
+                hostenv.read_host_file(failed_allocation_caller, 0, len(str(path)), 32, 36),
+                wasmmem.WASI_ENOSYS,
             )
 
     def test_ecl_session_eval_error_paths_without_wasm(self) -> None:
@@ -160,10 +160,14 @@ class SessionInternalsTests(unittest.TestCase):
         ecl._closed = True
         with self.assertRaisesRegex(EclError, "closed"):
             ecl.eval("(+ 1 2)")
+        with self.assertRaisesRegex(EclError, "closed"):
+            ecl.eval_json("(+ 1 2)")
 
         ecl._closed = False
         self.assertEqual(ecl.eval(""), "")
+        self.assertEqual(ecl.eval_json(""), "null")
 
+        ecl._eval = object()
         ecl._lock = ClosingLock(ecl)
         with self.assertRaisesRegex(EclError, "closed"):
             ecl.eval("x")
@@ -244,6 +248,7 @@ class SessionInternalsTests(unittest.TestCase):
                     "memory": FakeMemory(),
                     "eclpy_init": FakeFunc(lambda store: 1),
                     "eclpy_eval": FakeFunc(lambda *args: 0),
+                    "eclpy_eval_json": FakeFunc(lambda *args: 0),
                     "eclpy_alloc": FakeFunc(lambda *args: 1),
                     "eclpy_free": FakeFunc(lambda *args: None),
                     "eclpy_last_error": FakeFunc(lambda store: 0),
@@ -298,60 +303,70 @@ class SessionInternalsTests(unittest.TestCase):
         )()
         linker = FakeLinker()
         with patch.object(session.wasmtime, "FuncType", FakeFuncType):
-            session._define_emscripten_imports(linker, module, {"__builtins__": __builtins__})
+            hostenv.define_emscripten_imports(linker, module, {"__builtins__": __builtins__})
         self.assertEqual([item[1] for item in linker.defined], ["invoke_ii", "regular"])
 
     def test_env_import_and_syscall_helpers(self) -> None:
+        globals_: dict[str, object] = {"__builtins__": __builtins__}
         self.assertIsNone(
-            session._env_import("emscripten_notify_memory_growth", has_result=False)(FakeCaller())
+            hostenv.env_import(
+                "emscripten_notify_memory_growth", has_result=False, py_globals=globals_
+            )(FakeCaller())
         )
         self.assertEqual(
-            session._env_import("_emscripten_system", has_result=True)(FakeCaller()), -1
+            hostenv.env_import("_emscripten_system", has_result=True, py_globals=globals_)(
+                FakeCaller()
+            ),
+            -1,
         )
         self.assertEqual(
-            session._env_import("unknown", has_result=True)(FakeCaller()),
-            -session.WASI_ENOSYS,
+            hostenv.env_import("unknown", has_result=True, py_globals=globals_)(FakeCaller()),
+            -wasmmem.WASI_ENOSYS,
         )
-        self.assertIsNone(session._env_import("unknown", has_result=False)(FakeCaller()))
+        self.assertIsNone(
+            hostenv.env_import("unknown", has_result=False, py_globals=globals_)(FakeCaller())
+        )
 
         with patch.object(session.wasmtime, "Memory", FakeMemory):
             self.assertEqual(
-                session._stat_host_file(FakeCaller(), 0, -1, 32, 40),
-                session.WASI_EINVAL,
+                hostenv.stat_host_file(FakeCaller(), 0, -1, 32, 40),
+                wasmmem.WASI_EINVAL,
             )
 
             memory = FakeMemory(b"x.\0bad\0")
             caller = FakeCaller({"memory": memory})
-            self.assertEqual(session._getcwd(caller, 10, 0), -session.WASI_EINVAL)
-            self.assertEqual(session._getcwd(caller, 10, 1), -session.WASI_ERANGE)
-            self.assertEqual(session._getcwd(caller, 10, 2), 2)
+            self.assertEqual(hostenv.getcwd(caller, 10, 0), -wasmmem.WASI_EINVAL)
+            self.assertEqual(hostenv.getcwd(caller, 10, 1), -wasmmem.WASI_ERANGE)
+            self.assertEqual(hostenv.getcwd(caller, 10, 2), 2)
             self.assertEqual(memory.writes[-1], (caller, b"/\0", 10))
-            self.assertEqual(session._chdir(caller, 1), 0)
+            self.assertEqual(hostenv.chdir(caller, 1), 0)
             self.assertEqual(
-                session._env_import("__syscall_chdir", has_result=True)(caller, 1),
+                hostenv.env_import("__syscall_chdir", has_result=True, py_globals=globals_)(
+                    caller, 1
+                ),
                 0,
             )
             self.assertEqual(
-                session._chdir(FakeCaller({"memory": FakeMemory(b"xbad\0")}), 1),
-                -session.WASI_ENOENT,
+                hostenv.chdir(FakeCaller({"memory": FakeMemory(b"xbad\0")}), 1),
+                -wasmmem.WASI_ENOENT,
             )
             with self.assertRaisesRegex(EclError, "does not export memory"):
-                session._memory(FakeCaller())
+                wasmmem.memory(FakeCaller())
 
     def test_eval_python_import(self) -> None:
         with patch.multiple(session.wasmtime, Func=FakeFunc, Memory=MutableFakeMemory):
             py_globals: dict[str, object] = {"__builtins__": __builtins__}
 
             self.assertEqual(
-                session._eval_python(FakeCaller(), py_globals, 0, -1, 64, 68, 72),
-                session.WASI_EINVAL,
+                hostenv.eval_python(FakeCaller(), py_globals, 0, -1, 64, 68, 72),
+                wasmmem.WASI_EINVAL,
             )
 
             self.assertEqual(
-                session._eval_python(
+                hostenv.eval_python(
                     FakeCaller({"memory": MutableFakeMemory()}), py_globals, 0, 0, 64, 68, 72
                 ),
-                session.WASI_ENOSYS,
+                wasmmem.WASI_ENOSYS,
             )
 
             def run_eval(source: str, memory: MutableFakeMemory, malloc_ptr: int = 256):
@@ -359,7 +374,7 @@ class SessionInternalsTests(unittest.TestCase):
                 caller = FakeCaller(
                     {"memory": memory, "malloc": FakeFunc(lambda caller, size: malloc_ptr)}
                 )
-                status = session._eval_python(
+                status = hostenv.eval_python(
                     caller, py_globals, 0, len(source.encode()), 64, 68, 72
                 )
                 out_ptr = int.from_bytes(memory.data[64:68], "little", signed=True)
@@ -372,7 +387,7 @@ class SessionInternalsTests(unittest.TestCase):
                 caller = FakeCaller(
                     {"memory": memory, "malloc": FakeFunc(lambda caller, size: malloc_ptr)}
                 )
-                status = session._exec_python(
+                status = hostenv.exec_python(
                     caller, py_globals, 0, len(source.encode()), 64, 68, 72
                 )
                 out_ptr = int.from_bytes(memory.data[64:68], "little", signed=True)
@@ -388,11 +403,11 @@ class SessionInternalsTests(unittest.TestCase):
             self.assertIn(b"SyntaxError", result)
 
             status, result, is_error = run_exec("x = 41", MutableFakeMemory(size=512))
-            self.assertEqual((status, result, is_error), (0, b"nil", 0))
+            self.assertEqual((status, result, is_error), (0, b"null", 0))
             status, result, is_error = run_eval("x + 1", MutableFakeMemory(size=512))
             self.assertEqual((status, result, is_error), (0, b"42", 0))
             status, result, is_error = run_eval("[1, 'x']", MutableFakeMemory(size=512))
-            self.assertEqual((status, result, is_error), (0, b'(1 "x")', 0))
+            self.assertEqual((status, result, is_error), (0, b'[1, "x"]', 0))
 
             status, result, is_error = run_eval("1 / 0", MutableFakeMemory(size=512))
             self.assertEqual((status, is_error), (0, 1))
@@ -404,15 +419,19 @@ class SessionInternalsTests(unittest.TestCase):
                 {"memory": failed_alloc, "malloc": FakeFunc(lambda caller, size: 0)}
             )
             self.assertEqual(
-                session._eval_python(caller, py_globals, 0, 5, 64, 68, 72),
-                session.WASI_ENOSYS,
+                hostenv.eval_python(caller, py_globals, 0, 5, 64, 68, 72),
+                wasmmem.WASI_ENOSYS,
             )
 
     def test_eval_python_default_globals(self) -> None:
         with patch.multiple(session.wasmtime, Func=FakeFunc, Memory=MutableFakeMemory):
             memory = MutableFakeMemory(b"2 ** 5", size=512)
             caller = FakeCaller({"memory": memory, "malloc": FakeFunc(lambda caller, size: 256)})
-            callback = session._env_import("eclpy_eval_python", has_result=True)
+            callback = hostenv.env_import(
+                "eclpy_eval_python",
+                has_result=True,
+                py_globals={"__builtins__": __builtins__},
+            )
             status = callback(caller, 0, 6, 64, 68, 72)
             out_ptr = int.from_bytes(memory.data[64:68], "little", signed=True)
             out_len = int.from_bytes(memory.data[68:72], "little", signed=True)
@@ -422,11 +441,15 @@ class SessionInternalsTests(unittest.TestCase):
             exec_caller = FakeCaller(
                 {"memory": exec_memory, "malloc": FakeFunc(lambda caller, size: 256)}
             )
-            exec_callback = session._env_import("eclpy_exec_python", has_result=True)
+            exec_callback = hostenv.env_import(
+                "eclpy_exec_python",
+                has_result=True,
+                py_globals={"__builtins__": __builtins__},
+            )
             self.assertEqual(exec_callback(exec_caller, 0, 6, 64, 68, 72), 0)
             out_ptr = int.from_bytes(exec_memory.data[64:68], "little", signed=True)
             out_len = int.from_bytes(exec_memory.data[68:72], "little", signed=True)
-            self.assertEqual(exec_memory.data[out_ptr : out_ptr + out_len], b"nil")
+            self.assertEqual(exec_memory.data[out_ptr : out_ptr + out_len], b"null")
 
 
 if __name__ == "__main__":

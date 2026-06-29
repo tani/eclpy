@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "eclpy_json.h"
+
 static int eclpy_booted = 0;
 static char *eclpy_error = NULL;
 
@@ -145,13 +147,15 @@ static cl_object eclpy_call_python(cl_object source, eclpy_python_bridge callbac
                 ecl_make_integer(status));
     }
 
-    cl_object payload = ecl_make_simple_base_string(data, data_len);
-    free(data);
     if (is_error != 0) {
-        FEerror("Python ~A failed: ~A", 2, ecl_make_simple_base_string(operation, -1), payload);
+        cl_object message = ecl_make_simple_base_string(data, data_len);
+        free(data);
+        FEerror("Python ~A failed: ~A", 2, ecl_make_simple_base_string(operation, -1), message);
     }
-    /* The host returns readable Lisp source for the native value (or NIL). */
-    return si_string_to_object(1, payload);
+    /* The host returns the value encoded as JSON. */
+    cl_object value = eclpy_json_to_value(data, data_len);
+    free(data);
+    return value;
 }
 
 static cl_object eclpy_py_eval(cl_object source) {
@@ -241,6 +245,33 @@ char *eclpy_eval(const char *source, int32_t source_len) {
             if (output == NULL) {
                 eclpy_set_error("failed to allocate Lisp result buffer");
             }
+        }
+    } ECL_CATCH_ALL_IF_CAUGHT {
+        eclpy_set_error("ECL evaluation escaped the protected region");
+        output = NULL;
+    } ECL_CATCH_ALL_END;
+
+    return output;
+}
+
+char *eclpy_eval_json(const char *source, int32_t source_len) {
+    if (source == NULL || source_len < 0) {
+        eclpy_set_error("invalid Lisp source buffer");
+        return NULL;
+    }
+    if (eclpy_init() != 0) {
+        return NULL;
+    }
+
+    eclpy_set_error(NULL);
+    char *output = NULL;
+    cl_env_ptr env = ecl_process_env();
+    ECL_CATCH_ALL_BEGIN(env) {
+        int saw_form = 0;
+        cl_object result = eclpy_eval_forms(source, source_len, ECL_NIL, &saw_form);
+        output = eclpy_value_to_json_cstring(saw_form ? result : ECL_NIL);
+        if (output == NULL) {
+            eclpy_set_error("failed to allocate JSON result buffer");
         }
     } ECL_CATCH_ALL_IF_CAUGHT {
         eclpy_set_error("ECL evaluation escaped the protected region");

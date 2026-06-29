@@ -3,8 +3,7 @@ from __future__ import annotations
 import unittest
 from fractions import Fraction
 
-from eclpy import EclError, SExp
-from eclpy.reader import _unescape_lisp_string
+from eclpy import SExp
 
 
 class ReaderAndSExpTests(unittest.TestCase):
@@ -25,10 +24,6 @@ class ReaderAndSExpTests(unittest.TestCase):
         self.assertEqual(str(SExp.ratio(Fraction(7, 3))), "7/3")
         self.assertEqual(str(SExp.float(1.25)), "1.25")
         self.assertEqual(str(SExp.string('a"b\\c')), '"a\\"b\\\\c"')
-
-    def test_reader_rejects_invalid_string_escape(self) -> None:
-        with self.assertRaisesRegex(EclError, "invalid ECL string escape"):
-            _unescape_lisp_string('"abc\\"')
 
 
 if __name__ == "__main__":

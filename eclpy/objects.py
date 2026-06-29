@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Self
 
-from .session import EclError
+from .errors import EclError
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

@@ -5,8 +5,8 @@ from __future__ import annotations
 from fractions import Fraction
 from typing import Any
 
+from .errors import EclError
 from .objects import Cons, List, Symbol
-from .session import EclError
 
 _OK_VALUE_INDEX = 1
 _ERROR_MIN_FIELDS = 3
@@ -84,11 +84,11 @@ def decode_value(node: Any, lisp: Any) -> Any:
 
 
 def node_tag(node: Any) -> str:
-    """Return the uppercase tag atom for a serialized ECL node."""
+    """Return the tag atom for a serialized ECL node."""
     if not isinstance(node, list) or not node:
         message = f"expected tagged ECL value, got {node!r}"
         raise EclError(message)
-    return symbol_atom(node[0]).upper()
+    return symbol_atom(node[0])
 
 
 def symbol_atom(value: Any) -> str:
@@ -100,8 +100,8 @@ def symbol_atom(value: Any) -> str:
 
 
 def optional_string(value: Any) -> str | None:
-    """Decode NIL-like values as ``None`` and other values as strings."""
-    if value in (None, "NIL"):
+    """Decode JSON null values as ``None`` and other values as strings."""
+    if value is None:
         return None
     return str(value)
 

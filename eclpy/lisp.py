@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+import json
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
 
 from .decode import decode_result
+from .errors import EclError
 from .objects import Reference
-from .reader import parse_one
 from .runtime_lisp import HELPER_SOURCE
-from .session import EclError, EclSession
+from .session import EclSession
 from .sexp import SExp
 
 if TYPE_CHECKING:
@@ -75,7 +76,7 @@ class Lisp:
         return decode_result(result, self)
 
     def _eval_helper(self, sexp: SExp) -> Any:
-        return parse_one(self.session.eval(str(sexp)))
+        return json.loads(self.session.eval_json(str(sexp)))
 
     def _make_reference(self, object_id: int, type_name: str) -> Reference:
         reference = Reference(self, object_id, type_name)

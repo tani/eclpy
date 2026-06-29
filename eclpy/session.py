@@ -4,36 +4,22 @@ from __future__ import annotations
 
 import builtins
 import os
-import stat as stat_module
-import struct
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import wasmtime
 
+from .errors import EclError
+from .hostenv import define_emscripten_imports
+from .wasmmem import read_c_string
+
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from types import TracebackType
     from typing import Self
 
 PACKAGE_WASM = Path(__file__).with_name("ecl_eval.wasm")
 BUILD_WASM = Path(__file__).resolve().parents[1] / "build" / "eclpy" / "ecl_eval.wasm"
-
-WASI_EINVAL = 28
-WASI_ENOENT = 44
-WASI_ENOSYS = 52
-WASI_ERANGE = 68
-
-
-class EclError(RuntimeError):
-    """Raised when the ECL WebAssembly runtime cannot evaluate Lisp code."""
-
-    def __init__(self, message: str, *, condition_type: str | None = None) -> None:
-        super().__init__(message)
-        self.message = message
-        self.condition_type = condition_type
-
 
 class EclSession:
     """A persistent ECL process hosted inside a WebAssembly instance."""
@@ -61,7 +47,7 @@ class EclSession:
         linker = wasmtime.Linker(self._engine)
         linker.define_wasi()
         self._py_globals: dict[str, Any] = {"__builtins__": builtins}
-        _define_emscripten_imports(linker, module, self._py_globals)
+        define_emscripten_imports(linker, module, self._py_globals)
 
         try:
             self._instance = linker.instantiate(self._store, module)
@@ -75,6 +61,7 @@ class EclSession:
         self._memory = _export(exports, "memory", wasmtime.Memory)
         self._init = _export(exports, "eclpy_init", wasmtime.Func)
         self._eval = _export(exports, "eclpy_eval", wasmtime.Func)
+        self._eval_json = _export(exports, "eclpy_eval_json", wasmtime.Func)
         self._alloc = _export(exports, "eclpy_alloc", wasmtime.Func)
         self._free = _export(exports, "eclpy_free", wasmtime.Func)
         self._last_error = _export(exports, "eclpy_last_error", wasmtime.Func)
@@ -93,10 +80,21 @@ class EclSession:
         if self._closed:
             message = "ECL session is closed"
             raise EclError(message)
-
-        data = code.encode("utf-8")
-        if not data:
+        if not code:
             return ""
+        return self._eval_with(self._eval, code)
+
+    def eval_json(self, code: str) -> str:
+        """Evaluate Lisp source and return the last primary value as JSON."""
+        if self._closed:
+            message = "ECL session is closed"
+            raise EclError(message)
+        if not code:
+            return "null"
+        return self._eval_with(self._eval_json, code)
+
+    def _eval_with(self, func: wasmtime.Func, code: str) -> str:
+        data = code.encode("utf-8")
 
         with self._lock:
             if self._closed:
@@ -111,11 +109,11 @@ class EclSession:
             out_ptr = 0
             try:
                 self._memory.write(self._store, data, in_ptr)
-                out_ptr = self._call_i32(self._eval, in_ptr, len(data))
+                out_ptr = self._call_i32(func, in_ptr, len(data))
                 if out_ptr == 0:
                     message = self._read_last_error() or "ECL evaluation failed"
                     raise EclError(message)
-                return _read_c_string(self._memory, self._store, out_ptr)
+                return read_c_string(self._memory, self._store, out_ptr)
             finally:
                 self._free(self._store, in_ptr)
                 if out_ptr:
@@ -149,7 +147,7 @@ class EclSession:
         return result
 
     def _read_last_error(self) -> str:
-        return _read_c_string(self._memory, self._store, self._call_i32(self._last_error))
+        return read_c_string(self._memory, self._store, self._call_i32(self._last_error))
 
 
 def _engine_config() -> wasmtime.Config:
@@ -177,212 +175,3 @@ def _export(exports: Any, name: str, expected_type: type[Any]) -> Any:
         message = f"ECL WASM module does not export `{name}`"
         raise EclError(message)
     return value
-
-
-def _define_emscripten_imports(
-    linker: wasmtime.Linker,
-    module: wasmtime.Module,
-    py_globals: dict[str, Any],
-) -> None:
-    seen: set[str] = set()
-    for item in module.imports:
-        name = item.name
-        if (
-            name is not None
-            and item.module == "env"
-            and name not in seen
-            and isinstance(item.type, wasmtime.FuncType)
-        ):
-            seen.add(name)
-            callback = _env_import(
-                name,
-                has_result=bool(list(item.type.results)),
-                py_globals=py_globals,
-            )
-            linker.define_func("env", name, item.type, callback, access_caller=True)
-
-
-def _env_import(
-    name: str,
-    *,
-    has_result: bool,
-    py_globals: dict[str, Any] | None = None,
-) -> Callable[..., Any]:
-    def callback(caller: wasmtime.Caller, *args: int) -> Any:
-        match name:
-            case "eclpy_read_file":
-                return _read_host_file(caller, *args)
-            case "eclpy_stat":
-                return _stat_host_file(caller, *args)
-            case "eclpy_eval_python":
-                return _eval_python(caller, _ensure_globals(py_globals), *args)
-            case "eclpy_exec_python":
-                return _exec_python(caller, _ensure_globals(py_globals), *args)
-            case "emscripten_notify_memory_growth":
-                return None
-            case "_emscripten_system":
-                return -1
-            case "__syscall_getcwd":
-                return _getcwd(caller, *args)
-            case "__syscall_chdir":
-                return _chdir(caller, *args)
-            case _:
-                return -WASI_ENOSYS if has_result else None
-
-    return callback
-
-
-def _ensure_globals(py_globals: dict[str, Any] | None) -> dict[str, Any]:
-    return py_globals if py_globals is not None else {"__builtins__": builtins}
-
-
-def _eval_python(caller: wasmtime.Caller, py_globals: dict[str, Any], *args: int) -> int:
-    return _run_python(caller, py_globals, "eval", *args)
-
-
-def _exec_python(caller: wasmtime.Caller, py_globals: dict[str, Any], *args: int) -> int:
-    return _run_python(caller, py_globals, "exec", *args)
-
-
-def _run_python(
-    caller: wasmtime.Caller,
-    py_globals: dict[str, Any],
-    mode: str,
-    src_ptr: int,
-    src_len: int,
-    out_data_ptr: int,
-    out_len_ptr: int,
-    out_is_error_ptr: int,
-) -> int:
-    if src_len < 0:
-        return WASI_EINVAL
-
-    memory = _memory(caller)
-    malloc = caller.get("malloc")
-    if not isinstance(malloc, wasmtime.Func):
-        return WASI_ENOSYS
-
-    is_error = 0
-    try:
-        source = bytes(memory.read(caller, src_ptr, src_ptr + src_len)).decode("utf-8")
-        code = builtins.compile(source, "<ecl-python>", mode)
-        if mode == "eval":
-            from .encode import to_lisp_literal
-
-            result = to_lisp_literal(builtins.eval(code, py_globals))
-        else:
-            exec(code, py_globals)
-            result = "nil"
-    except Exception as exc:
-        is_error = 1
-        result = f"{type(exc).__name__}: {exc}"
-
-    data = result.encode("utf-8")
-    allocation_size = max(len(data), 1)
-    data_ptr = malloc(caller, allocation_size)
-    if not isinstance(data_ptr, int) or data_ptr == 0:
-        return WASI_ENOSYS
-
-    if data:
-        memory.write(caller, data, data_ptr)
-    _write_i32(memory, caller, out_data_ptr, data_ptr)
-    _write_i32(memory, caller, out_len_ptr, len(data))
-    _write_i32(memory, caller, out_is_error_ptr, is_error)
-    return 0
-
-
-def _read_host_file(
-    caller: wasmtime.Caller,
-    path_ptr: int,
-    path_len: int,
-    out_data_ptr: int,
-    out_len_ptr: int,
-) -> int:
-    if path_len < 0:
-        return WASI_EINVAL
-
-    memory = _memory(caller)
-    malloc = caller.get("malloc")
-    if not isinstance(malloc, wasmtime.Func):
-        return WASI_ENOSYS
-
-    try:
-        path_bytes = memory.read(caller, path_ptr, path_ptr + path_len)
-        path = Path(bytes(path_bytes).decode("utf-8"))
-        data = path.read_bytes()
-    except (OSError, UnicodeDecodeError, ValueError):
-        return WASI_ENOENT
-
-    allocation_size = max(len(data), 1)
-    data_ptr = malloc(caller, allocation_size)
-    if not isinstance(data_ptr, int) or data_ptr == 0:
-        return WASI_ENOSYS
-
-    if data:
-        memory.write(caller, data, data_ptr)
-    _write_i32(memory, caller, out_data_ptr, data_ptr)
-    _write_i32(memory, caller, out_len_ptr, len(data))
-    return 0
-
-
-def _stat_host_file(
-    caller: wasmtime.Caller,
-    path_ptr: int,
-    path_len: int,
-    out_kind_ptr: int,
-    out_mtime_ptr: int,
-) -> int:
-    if path_len < 0:
-        return WASI_EINVAL
-
-    memory = _memory(caller)
-    kind = 0
-    mtime = 0.0
-    try:
-        path_bytes = memory.read(caller, path_ptr, path_ptr + path_len)
-        stat = Path(bytes(path_bytes).decode("utf-8")).stat()
-    except (OSError, UnicodeDecodeError, ValueError):
-        pass
-    else:
-        mode = stat.st_mode
-        kind = 2 if stat_module.S_ISDIR(mode) else 1 if stat_module.S_ISREG(mode) else 0
-        mtime = stat.st_mtime
-    _write_i32(memory, caller, out_kind_ptr, kind)
-    memory.write(caller, struct.pack("<d", mtime), out_mtime_ptr)
-    return 0
-
-
-def _getcwd(caller: wasmtime.Caller, buf: int, size: int) -> int:
-    cwd = b"/\0"
-    if size == 0:
-        return -WASI_EINVAL
-    if size < len(cwd):
-        return -WASI_ERANGE
-    _memory(caller).write(caller, cwd, buf)
-    return len(cwd)
-
-
-def _chdir(caller: wasmtime.Caller, path_ptr: int) -> int:
-    return 0 if _read_c_string(_memory(caller), caller, path_ptr) in {".", "/"} else -WASI_ENOENT
-
-
-def _memory(caller: wasmtime.Caller) -> wasmtime.Memory:
-    value = caller.get("memory")
-    if not isinstance(value, wasmtime.Memory):
-        message = "ECL WASM module does not export memory"
-        raise EclError(message)
-    return value
-
-
-def _write_i32(memory: wasmtime.Memory, context: Any, ptr: int, value: int) -> None:
-    memory.write(context, value.to_bytes(4, "little", signed=True), ptr)
-
-
-def _read_c_string(memory: wasmtime.Memory, context: Any, ptr: int) -> str:
-    if ptr == 0:
-        return ""
-    data = memory.read(context, ptr, memory.data_len(context))
-    nul_index = data.find(0)
-    if nul_index >= 0:
-        data = data[:nul_index]
-    return bytes(data).decode("utf-8", errors="replace")

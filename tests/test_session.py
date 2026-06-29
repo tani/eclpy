@@ -12,7 +12,6 @@ import eclpy.syntax as L
 from eclpy import Cons, EclError, EclSession, Lisp, List, Reference, SExp, Symbol
 from eclpy.lisp import ASDF_SOURCE
 from eclpy.proxy import find_package
-from eclpy.reader import parse_one
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_WASM = ROOT / "eclpy" / "ecl_eval.wasm"
@@ -308,24 +307,6 @@ class LispApiTests(unittest.TestCase):
             '(+ 1 "two \\"words\\" \\\\ ok" :TEST-KEY COMMON-LISP::CAR \'FOO #\'BAR (raw form))',
         )
         self.assertEqual(str(SExp.list()), "nil")
-
-    def test_lark_reader_parses_tagged_results(self) -> None:
-        self.assertEqual(parse_one("(:OK (:INT 42))"), [":OK", [":INT", 42]])
-        self.assertEqual(parse_one('(:STRING "a\\"b\\\\c")'), [":STRING", 'a"b\\c'])
-        self.assertEqual(parse_one('(:REF 7 "FUNCTION")'), [":REF", 7, "FUNCTION"])
-        self.assertEqual(
-            parse_one("(:DOTTED-LIST ((:INT 1) (:INT 2)) (:INT 3))"),
-            [
-                ":DOTTED-LIST",
-                [[":INT", 1], [":INT", 2]],
-                [":INT", 3],
-            ],
-        )
-
-        with self.assertRaises(EclError):
-            parse_one("(:INT 1")
-        with self.assertRaises(EclError):
-            parse_one("(:INT 1) (:INT 2)")
 
     def test_lisp_values_keep_strings_and_symbols_distinct(self) -> None:
         with Lisp(require_wasm()) as lisp:

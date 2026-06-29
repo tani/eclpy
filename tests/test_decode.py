@@ -45,7 +45,7 @@ class DecodeTests(unittest.TestCase):
         self.assertEqual(
             decode_value([":SYMBOL", "CAR", "COMMON-LISP"], lisp), Symbol("CAR", "COMMON-LISP")
         )
-        self.assertEqual(decode_value([":SYMBOL", "FOO", "NIL"], lisp), Symbol("FOO"))
+        self.assertEqual(decode_value([":SYMBOL", "FOO", None], lisp), Symbol("FOO"))
         self.assertEqual(decode_value([":LIST", [":INT", 1], [":INT", 2]], lisp), List(1, 2))
         self.assertEqual(
             decode_value([":DOTTED-LIST", [[":INT", 1], [":INT", 2]], [":INT", 3]], lisp),
@@ -66,7 +66,6 @@ class DecodeTests(unittest.TestCase):
         with self.assertRaisesRegex(EclError, "expected ECL symbol atom"):
             symbol_atom(1)
         self.assertIsNone(optional_string(None))
-        self.assertIsNone(optional_string("NIL"))
         with self.assertRaisesRegex(EclError, "malformed ECL tagged value"):
             expect_len([":INT"], 2)
 

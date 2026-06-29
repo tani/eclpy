@@ -18,6 +18,10 @@ class FakeSession:
             raise EclError("release failed")
         return "(:OK (:NIL))"
 
+    def eval_json(self, code: str) -> str:
+        self.calls.append(code)
+        return ' [":OK", [":NIL"]] '
+
 
 class ApiInternalsTests(unittest.TestCase):
     def test_repr_and_package_helpers(self) -> None:
