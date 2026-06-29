@@ -24,28 +24,6 @@ class _PackageLike(Protocol):
     name: str
 
 
-def to_syntax_expr(value: Any) -> SExp:
-    """Convert a Python value into syntax-level Lisp expression input."""
-    match value:
-        case SExp() as sexp:
-            return sexp
-        case tuple() as items:
-            if not items:
-                return SExp.atom("nil")
-            head = items[0]
-            if isinstance(head, str):
-                message = (
-                    "Lisp form operators must be eclpy.Symbol instances; "
-                    f"use Symbol({head!r}) instead of {head!r}"
-                )
-                raise TypeError(message)
-            return SExp.list(*(to_syntax_expr(item) for item in items))
-        case Symbol() as symbol:
-            return SExp.symbol(symbol.name, symbol.package)
-        case _:
-            return to_data_expr(value)
-
-
 def to_syntax_api_expr(value: Any) -> SExp:
     """Convert a Python Syntax API value into a Lisp expression."""
     match value:
@@ -63,11 +41,7 @@ def to_syntax_api_expr(value: Any) -> SExp:
                 return SExp.list(*(to_syntax_api_expr(item) for item in items))
             return SExp.quote(to_syntax_api_literal_list(items))
         case _:
-            try:
-                return to_data_expr(value)
-            except TypeError as exc:
-                message = f"cannot convert {type(value).__name__} to Lisp syntax expression"
-                raise TypeError(message) from exc
+            return to_data_expr(value)
 
 
 def to_syntax_api_literal(value: Any) -> SExp:
@@ -82,11 +56,7 @@ def to_syntax_api_literal(value: Any) -> SExp:
         case (tuple() | list() | List()) as sequence:
             return to_syntax_api_literal_list(tuple(sequence))
         case _:
-            try:
-                return to_data_expr(value)
-            except TypeError as exc:
-                message = f"cannot convert {type(value).__name__} to Lisp syntax literal"
-                raise TypeError(message) from exc
+            return to_data_expr(value)
 
 
 def to_syntax_api_literal_list(items: tuple[Any, ...]) -> SExp:
@@ -143,15 +113,6 @@ def to_data_expr(value: Any) -> SExp:
         case _:
             message = f"cannot convert {type(value).__name__} to Lisp"
             raise TypeError(message)
-
-
-def keyword_parts(kwargs: dict[str, Any], *, values_as_expr: bool) -> list[SExp]:
-    """Encode Python keyword arguments as alternating Lisp keyword/value forms."""
-    parts: list[SExp] = []
-    for key, value in kwargs.items():
-        parts.append(SExp.keyword(key))
-        parts.append(to_syntax_expr(value) if values_as_expr else to_data_expr(value))
-    return parts
 
 
 def _is_callable_symbol(value: Any) -> bool:

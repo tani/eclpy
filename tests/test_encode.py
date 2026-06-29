@@ -4,7 +4,7 @@ import unittest
 from fractions import Fraction
 
 from eclpy import Cons, EclError, List, Reference, SExp, Symbol
-from eclpy.encode import keyword_parts, to_data_expr, to_syntax_expr
+from eclpy.encode import to_data_expr
 
 
 class Package:
@@ -14,16 +14,6 @@ class Package:
 
 
 class EncodeTests(unittest.TestCase):
-    def test_to_syntax_expr_converts_forms(self) -> None:
-        passthrough = SExp.integer(3)
-        self.assertIs(to_syntax_expr(passthrough), passthrough)
-        self.assertEqual(str(to_syntax_expr(())), "nil")
-        self.assertEqual(str(to_syntax_expr((Symbol("+"), 1, 2))), "(+ 1 2)")
-        self.assertEqual(str(to_syntax_expr(Symbol("CAR", "CL"))), "CL::CAR")
-        self.assertEqual(str(to_syntax_expr(9)), "9")
-        with self.assertRaisesRegex(TypeError, "operators must be eclpy.Symbol"):
-            to_syntax_expr(("+", 1, 2))
-
     def test_to_data_expr_converts_python_values(self) -> None:
         passthrough = SExp.string("x")
         self.assertIs(to_data_expr(passthrough), passthrough)
@@ -51,19 +41,6 @@ class EncodeTests(unittest.TestCase):
             to_data_expr(Reference(None, 7, "OBJECT", released=True))
         with self.assertRaisesRegex(TypeError, "cannot convert object"):
             to_data_expr(object())
-
-    def test_keyword_parts_converts_values_by_mode(self) -> None:
-        self.assertEqual(
-            " ".join(str(part) for part in keyword_parts({"key": "value"}, values_as_expr=False)),
-            ':KEY "value"',
-        )
-        self.assertEqual(
-            " ".join(
-                str(part)
-                for part in keyword_parts({"test_key": (Symbol("+"), 1, 2)}, values_as_expr=True)
-            ),
-            ":TEST-KEY (+ 1 2)",
-        )
 
 
 if __name__ == "__main__":

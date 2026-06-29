@@ -59,9 +59,9 @@ class SyntaxApiTests(unittest.TestCase):
         self.assertEqual(str(L.expr(List(1, 2))), "'(1 2)")
 
     def test_expr_rejects_unknown_values(self) -> None:
-        with self.assertRaisesRegex(TypeError, "syntax expression"):
+        with self.assertRaisesRegex(TypeError, "cannot convert object to Lisp"):
             L.expr(object())
-        with self.assertRaisesRegex(TypeError, "syntax literal"):
+        with self.assertRaisesRegex(TypeError, "cannot convert object to Lisp"):
             L.quote(object())
 
 
