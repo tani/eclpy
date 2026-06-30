@@ -12,12 +12,11 @@ from eclpy import EclError
 from eclpy.__main__ import (
     _balanced,
     _current_package,
+    _enter_handler,
     _eval_and_print,
-    _highlight,
+    _make_prompt_session,
     _repl,
     _run,
-    _save_readline_history,
-    _setup_readline,
     main,
 )
 
@@ -39,7 +38,6 @@ class BalancedTests(unittest.TestCase):
         self.assertFalse(_balanced("(defun foo (x)"))
 
     def test_extra_close(self) -> None:
-        # surplus ')' must not be treated as balanced
         self.assertFalse(_balanced(")))"))
 
     def test_unbalanced_closed_by_string(self) -> None:
@@ -55,7 +53,6 @@ class BalancedTests(unittest.TestCase):
         self.assertTrue(_balanced('(foo "a\\"b")'))
 
     def test_comment_at_end_of_input_no_newline(self) -> None:
-        # ';' with no trailing newline — find("\n") returns -1, hits the break
         self.assertFalse(_balanced("(foo ; unterminated comment"))
 
 
@@ -75,29 +72,36 @@ def _fake_lisp(responses: list[str]) -> SimpleNamespace:
     return SimpleNamespace(session=FakeSession(responses))
 
 
-class HighlightTests(unittest.TestCase):
-    def test_no_tty_returns_plain(self) -> None:
-        with patch("sys.stdout") as mock_stdout:
-            mock_stdout.isatty.return_value = False
-            self.assertEqual(_highlight("NIL"), "NIL")
+class MakePromptSessionTests(unittest.TestCase):
+    def test_returns_session_when_deps_available(self) -> None:
+        result = _make_prompt_session(Path("/tmp/test_history"))
+        self.assertIsNotNone(result)
 
-    def test_tty_with_pygments(self) -> None:
-        mock_hl = MagicMock(return_value="colored\n")
-        with patch("sys.stdout") as mock_stdout, \
-             patch("eclpy.__main__._highlight", wraps=_highlight):
-            mock_stdout.isatty.return_value = True
-            with patch.dict("sys.modules", {}):
-                import pygments.formatters
-                import pygments.lexers
-                with patch("pygments.highlight", mock_hl):
-                    result = _highlight("NIL")
-        self.assertEqual(result, "colored")
+    def test_returns_none_when_import_fails(self) -> None:
+        with patch.dict("sys.modules", {"prompt_toolkit": None}):
+            result = _make_prompt_session(Path("/tmp/test_history"))
+        self.assertIsNone(result)
 
-    def test_tty_without_pygments(self) -> None:
-        with patch("sys.stdout") as mock_stdout, \
-             patch.dict("sys.modules", {"pygments": None}):
-            mock_stdout.isatty.return_value = True
-            self.assertEqual(_highlight("NIL"), "NIL")
+
+class EnterHandlerTests(unittest.TestCase):
+    def _make_event(self, text: str) -> MagicMock:
+        mock_buf = MagicMock()
+        mock_buf.text = text
+        mock_event = MagicMock()
+        mock_event.app.current_buffer = mock_buf
+        return mock_event
+
+    def test_submits_when_balanced(self) -> None:
+        event = self._make_event("(+ 1 2)")
+        _enter_handler(event)
+        event.app.current_buffer.validate_and_handle.assert_called_once()
+        event.app.current_buffer.insert_text.assert_not_called()
+
+    def test_inserts_newline_when_unbalanced(self) -> None:
+        event = self._make_event("(defun foo (x)")
+        _enter_handler(event)
+        event.app.current_buffer.insert_text.assert_called_once_with("\n")
+        event.app.current_buffer.validate_and_handle.assert_not_called()
 
 
 class EvalAndPrintTests(unittest.TestCase):
@@ -146,51 +150,13 @@ class CurrentPackageTests(unittest.TestCase):
         self.assertEqual(_current_package(lisp, "FALLBACK"), "FALLBACK")  # type: ignore[arg-type]
 
 
-class ReadlineTests(unittest.TestCase):
-    def test_setup_returns_module_and_loads_history(self) -> None:
-        mock_rl = MagicMock()
-        with patch.dict("sys.modules", {"readline": mock_rl}):
-            result = _setup_readline()
-        self.assertIs(result, mock_rl)
-        mock_rl.read_history_file.assert_called_once()
-        mock_rl.set_history_length.assert_called_once_with(1000)
-
-    def test_setup_missing_history_file(self) -> None:
-        mock_rl = MagicMock()
-        mock_rl.read_history_file.side_effect = OSError("no file")
-        with patch.dict("sys.modules", {"readline": mock_rl}):
-            result = _setup_readline()
-        self.assertIs(result, mock_rl)
-
-    def test_setup_no_module_returns_none(self) -> None:
-        with patch.dict("sys.modules", {"readline": None}):
-            result = _setup_readline()
-        self.assertIsNone(result)
-
-    def test_save_calls_write(self) -> None:
-        mock_rl = MagicMock()
-        _save_readline_history(mock_rl)
-        mock_rl.write_history_file.assert_called_once()
-
-    def test_save_oserror_is_silent(self) -> None:
-        mock_rl = MagicMock()
-        mock_rl.write_history_file.side_effect = OSError("no write")
-        _save_readline_history(mock_rl)  # must not raise
-
-    def test_save_none_is_noop(self) -> None:
-        _save_readline_history(None)  # must not raise
-
-
 class ReplTests(unittest.TestCase):
     def setUp(self) -> None:
-        self._p_setup = patch("eclpy.__main__._setup_readline", return_value=None)
-        self._p_save = patch("eclpy.__main__._save_readline_history")
-        self._p_setup.start()
-        self._p_save.start()
+        self._p_ps = patch("eclpy.__main__._make_prompt_session", return_value=None)
+        self._p_ps.start()
 
     def tearDown(self) -> None:
-        self._p_setup.stop()
-        self._p_save.stop()
+        self._p_ps.stop()
 
     def _inputs(self, *items: object):
         it = iter(items)
@@ -288,6 +254,61 @@ class ReplTests(unittest.TestCase):
         self.assertEqual(prompts[0], "ECLPY-USER> ")
         self.assertEqual(prompts[1], "CL-USER> ")
 
+    def test_keyboard_interrupt_continues(self) -> None:
+        lisp = _fake_lisp([])
+        call_count = 0
+
+        def fake_input(prompt: str = "") -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise KeyboardInterrupt
+            raise EOFError
+
+        with patch("builtins.input", side_effect=fake_input), \
+             patch("sys.stdout", new_callable=StringIO):
+            _repl(lisp)  # type: ignore[arg-type]
+        self.assertEqual(call_count, 2)
+
+    def test_prompt_session_used_when_available(self) -> None:
+        lisp = _fake_lisp(["5"])
+        mock_ps = MagicMock()
+        call_count = 0
+
+        def fake_prompt(prompt: str = "") -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return "(+ 2 3)"
+            raise EOFError
+
+        mock_ps.prompt.side_effect = fake_prompt
+
+        with patch("eclpy.__main__._make_prompt_session", return_value=mock_ps), \
+             patch("sys.stdout", new_callable=StringIO) as out:
+            _repl(lisp)  # type: ignore[arg-type]
+        self.assertIn("5", out.getvalue())
+        mock_ps.prompt.assert_called()
+
+    def test_prompt_session_keyboard_interrupt(self) -> None:
+        lisp = _fake_lisp([])
+        mock_ps = MagicMock()
+        call_count = 0
+
+        def fake_prompt(prompt: str = "") -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise KeyboardInterrupt
+            raise EOFError
+
+        mock_ps.prompt.side_effect = fake_prompt
+
+        with patch("eclpy.__main__._make_prompt_session", return_value=mock_ps), \
+             patch("sys.stdout", new_callable=StringIO):
+            _repl(lisp)  # type: ignore[arg-type]
+        self.assertEqual(call_count, 2)
+
 
 class MainTests(unittest.TestCase):
     def _patched_lisp(self, responses: list[str]):
@@ -349,7 +370,7 @@ class MainTests(unittest.TestCase):
         lisp = self._patched_lisp(["7"])
         with patch("eclpy.__main__.Lisp", return_value=lisp), \
              patch("sys.argv", ["eclpy"]), \
+             patch("eclpy.__main__._make_prompt_session", return_value=None), \
              patch("builtins.input", side_effect=lambda p="": (_ for _ in ()).throw(EOFError())), \
              patch("sys.stdout", new_callable=StringIO):
             main()
-

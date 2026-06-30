@@ -9,6 +9,7 @@ requires-python = ">=3.14"
 dependencies = [
     "wasmtime>=45.0.0",
     "pygments>=2.0",
+    "prompt-toolkit>=3.0.52",
 ]
 classifiers = [
     "License :: OSI Approved :: GNU Lesser General Public License v2 or later (LGPLv2+)",

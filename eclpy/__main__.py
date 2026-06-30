@@ -44,45 +44,43 @@ def _balanced(text: str) -> bool:
     return depth == 0
 
 
-def _setup_readline() -> Any:
+def _enter_handler(event: Any) -> None:
+    buf = event.app.current_buffer
+    if _balanced(buf.text):
+        buf.validate_and_handle()
+    else:
+        buf.insert_text("\n")
+
+
+def _make_prompt_session(history_file: Path) -> Any:
     try:
-        import readline
+        from prompt_toolkit import PromptSession
+        from prompt_toolkit.history import FileHistory
+        from prompt_toolkit.key_binding import KeyBindings
+        from prompt_toolkit.lexers import PygmentsLexer
+        from prompt_toolkit.styles import style_from_pygments_cls
+        from pygments.lexers import CommonLispLexer
+        from pygments.styles import get_style_by_name
     except ImportError:
         return None
-    try:
-        readline.read_history_file(_HISTORY_FILE)
-    except OSError:
-        pass
-    readline.set_history_length(1000)
-    return readline
 
+    kb = KeyBindings()
+    kb.add("enter")(_enter_handler)
 
-def _save_readline_history(rl: Any) -> None:
-    if rl is None:
-        return
-    try:
-        rl.write_history_file(_HISTORY_FILE)
-    except OSError:
-        pass
-
-
-def _highlight(text: str) -> str:
-    if not sys.stdout.isatty():
-        return text
-    try:
-        from pygments import highlight
-        from pygments.formatters import TerminalFormatter
-        from pygments.lexers import CommonLispLexer
-        return highlight(text, CommonLispLexer(), TerminalFormatter()).rstrip("\n")
-    except ImportError:
-        return text
+    return PromptSession(
+        lexer=PygmentsLexer(CommonLispLexer),
+        style=style_from_pygments_cls(get_style_by_name("native")),
+        history=FileHistory(str(history_file)),
+        key_bindings=kb,
+        multiline=True,
+    )
 
 
 def _eval_and_print(lisp: Lisp, source: str) -> bool:
     try:
         result = lisp.session.eval(source)
         if result:
-            print(_highlight(result))
+            print(result)
         return True
     except EclError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -101,32 +99,38 @@ def _repl(lisp: Lisp) -> None:
         lisp.session.eval(_REPL_INIT)
     except EclError:
         pass
-    rl = _setup_readline()
+    ps = _make_prompt_session(_HISTORY_FILE)
     pkg = _current_package(lisp, "?")
 
     while True:
+        prompt = f"{pkg}> "
         try:
-            line = input(f"{pkg}> ")
+            if ps is not None:
+                source = ps.prompt(prompt)
+            else:
+                source = input(prompt)
         except EOFError:
             print()
             break
-
-        if not line.strip():
+        except KeyboardInterrupt:
+            print()
             continue
 
-        buf = line
-        while not _balanced(buf):
-            try:
-                buf += "\n" + input("  ")
-            except EOFError:
-                print()
-                _save_readline_history(rl)
-                return
+        if not source.strip():
+            continue
 
-        if _eval_and_print(lisp, buf):
+        if ps is None:
+            buf = source
+            while not _balanced(buf):
+                try:
+                    buf += "\n" + input("  ")
+                except EOFError:
+                    print()
+                    return
+            source = buf
+
+        if _eval_and_print(lisp, source):
             pkg = _current_package(lisp, pkg)
-
-    _save_readline_history(rl)
 
 
 def _run(lisp: Lisp, source: str) -> int:
