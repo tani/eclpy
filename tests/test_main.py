@@ -39,8 +39,17 @@ class BalancedTests(unittest.TestCase):
     def test_extra_close(self) -> None:
         self.assertFalse(_balanced(")))"))
 
+    def test_close_before_open(self) -> None:
+        self.assertFalse(_balanced(")("))
+
     def test_unbalanced_closed_by_string(self) -> None:
         self.assertFalse(_balanced('(foo "bar)'))
+
+    def test_unclosed_string(self) -> None:
+        self.assertFalse(_balanced('"unterminated'))
+
+    def test_trailing_string_escape(self) -> None:
+        self.assertFalse(_balanced('"unterminated\\'))
 
     def test_comment_paren_ignored(self) -> None:
         self.assertFalse(_balanced("(foo ; comment )\n"))
@@ -327,6 +336,15 @@ class MainTests(unittest.TestCase):
                 main()
         self.assertEqual(ctx.exception.code, 0)
         self.assertEqual(out.getvalue(), "5\n")
+
+    def test_eval_flag_accepts_empty_expression(self) -> None:
+        lisp = self._patched_lisp([""])
+        with patch("eclpy.__main__.Lisp", return_value=lisp), \
+             patch("sys.argv", ["eclpy", "-e", ""]), \
+             patch("sys.stdout", new_callable=StringIO):
+            with self.assertRaises(SystemExit) as ctx:
+                main()
+        self.assertEqual(ctx.exception.code, 0)
 
     def test_eval_error(self) -> None:
         lisp = MagicMock()

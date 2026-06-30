@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from .errors import EclError
 from .lisp import Lisp
@@ -16,6 +16,11 @@ _REPL_INIT = """
 """
 
 _HISTORY_FILE = Path.home() / ".eclpy_history"
+_CONTINUATION_PROMPT = "  "
+
+
+class _PromptSession(Protocol):
+    def prompt(self, message: str = "") -> str: ...
 
 
 def _balanced(text: str) -> bool:
@@ -40,8 +45,10 @@ def _balanced(text: str) -> bool:
                 depth += 1
             elif ch == ")":
                 depth -= 1
+                if depth < 0:
+                    return False
         i += 1
-    return depth == 0
+    return depth == 0 and not in_string and not escape
 
 
 def _enter_handler(event: Any) -> None:
@@ -52,7 +59,7 @@ def _enter_handler(event: Any) -> None:
         buf.insert_text("\n")
 
 
-def _make_prompt_session(history_file: Path) -> Any:
+def _make_prompt_session(history_file: Path) -> _PromptSession | None:
     try:
         from prompt_toolkit import PromptSession
         from prompt_toolkit.history import FileHistory
@@ -74,6 +81,13 @@ def _make_prompt_session(history_file: Path) -> Any:
         key_bindings=kb,
         multiline=True,
     )
+
+
+def _read_stdin_form(prompt: str) -> str:
+    source = input(prompt)
+    while not _balanced(source):
+        source += "\n" + input(_CONTINUATION_PROMPT)
+    return source
 
 
 def _eval_and_print(lisp: Lisp, source: str) -> bool:
@@ -105,10 +119,7 @@ def _repl(lisp: Lisp) -> None:
     while True:
         prompt = f"{pkg}> "
         try:
-            if ps is not None:
-                source = ps.prompt(prompt)
-            else:
-                source = input(prompt)
+            source = ps.prompt(prompt) if ps is not None else _read_stdin_form(prompt)
         except EOFError:
             print()
             break
@@ -118,16 +129,6 @@ def _repl(lisp: Lisp) -> None:
 
         if not source.strip():
             continue
-
-        if ps is None:
-            buf = source
-            while not _balanced(buf):
-                try:
-                    buf += "\n" + input("  ")
-                except EOFError:
-                    print()
-                    return
-            source = buf
 
         if _eval_and_print(lisp, source):
             pkg = _current_package(lisp, pkg)
@@ -147,7 +148,7 @@ def main() -> None:
     args = parser.parse_args()
 
     with Lisp() as lisp:
-        if args.eval:
+        if args.eval is not None:
             sys.exit(_run(lisp, args.eval))
         elif args.file:
             path = Path(args.file)

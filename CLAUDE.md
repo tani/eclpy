@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to coding agents when working with code in this repository.
 
 ## Project Overview
 
@@ -49,7 +49,10 @@ The main Python package with layered architecture:
 - **`pyproject.toml`** - Project metadata and dependencies
   - Requires Python 3.14+
   - Depends on `wasmtime>=45.0.0`
-  - Dev dependencies: ruff, basedpyright, coverage
+  - Optional REPL extras: `pygments`, `prompt-toolkit`
+  - Dev dependencies: ruff, basedpyright, coverage, hatchling
+  - Explicit wheel/sdist package data for `ecl_eval.wasm`, `asdf.lisp`, and `runtime.lisp`
+  - sdist excludes local worktrees, caches, virtualenvs, build outputs, and distribution outputs
   - Configured for 100% test coverage
 
 ### Testing: `tests/`
@@ -194,17 +197,24 @@ uv run coverage run -m unittest discover -s tests
 uv run coverage report -m  # Enforces 100% coverage
 ```
 
+Use `unittest` only. Do not add or rely on `pytest`; the project intentionally has no pytest configuration or dev dependency.
+
 ### Linting & Type Checking
 ```bash
 uv run ruff check .
 uv run basedpyright
 ```
 
-### Building Wheel
+`basedpyright` checks both `eclpy/` and `scripts/`, so build-hook imports such as `hatchling` must remain available in the dev dependency group.
+
+### Building Distributions
 ```bash
 uv build --wheel --out-dir dist --clear
+uv build --sdist --out-dir dist --clear
 ```
-Requires `eclpy/ecl_eval.wasm` and `eclpy/asdf.lisp` to exist first.
+Requires `eclpy/ecl_eval.wasm` and `eclpy/asdf.lisp` to exist first. `runtime.lisp` is also explicitly included in both wheel and sdist metadata.
+
+After packaging changes, inspect both artifacts. The sdist must not contain `.claude/`, `.codex/`, `.venv/`, `build/`, `dist/`, or cache directories.
 
 ### Test Coverage
 - **100% enforced** via `pyproject.toml` configuration
@@ -226,11 +236,13 @@ ECL_WASM=/path/to/custom.wasm uv run python -m unittest discover -s tests
 
 ### Runtime Dependencies
 - **wasmtime** (>=45.0.0): WebAssembly runtime with exception handling support
+- **REPL extras** (`eclpy[repl]`): `prompt-toolkit` and `pygments` for the interactive CLI experience
 
 ### Build Dependencies
 - **Emscripten** 6.0.1: Compiles ECL to WASM
 - **ECL** 26.5.5 (vendored): Common Lisp implementation
 - **Python** 3.14+: Host interpreter
+- **hatchling**: Build backend and local build-hook import used by `scripts/hatch_build.py`
 
 ### Key Configuration
 - WASM exceptions (not JS trampolines)
@@ -253,4 +265,3 @@ ECL_WASM=/path/to/custom.wasm uv run python -m unittest discover -s tests
 4. **Reference IDs**: Handles objects that cannot cross the boundary (functions, streams)
 5. **ASDF via file bridge**: Practical source-only module loading without full native environment
 6. **100% coverage enforced**: Catches regressions in core bridge logic
-
