@@ -66,11 +66,23 @@ def _save_readline_history(rl: Any) -> None:
         pass
 
 
+def _highlight(text: str) -> str:
+    if not sys.stdout.isatty():
+        return text
+    try:
+        from pygments import highlight
+        from pygments.formatters import TerminalFormatter
+        from pygments.lexers import CommonLispLexer
+        return highlight(text, CommonLispLexer(), TerminalFormatter()).rstrip("\n")
+    except ImportError:
+        return text
+
+
 def _eval_and_print(lisp: Lisp, source: str) -> bool:
     try:
         result = lisp.session.eval(source)
         if result:
-            print(result)
+            print(_highlight(result))
         return True
     except EclError as exc:
         print(f"error: {exc}", file=sys.stderr)

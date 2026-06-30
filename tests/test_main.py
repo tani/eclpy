@@ -13,6 +13,7 @@ from eclpy.__main__ import (
     _balanced,
     _current_package,
     _eval_and_print,
+    _highlight,
     _repl,
     _run,
     _save_readline_history,
@@ -72,6 +73,31 @@ class FakeSession:
 
 def _fake_lisp(responses: list[str]) -> SimpleNamespace:
     return SimpleNamespace(session=FakeSession(responses))
+
+
+class HighlightTests(unittest.TestCase):
+    def test_no_tty_returns_plain(self) -> None:
+        with patch("sys.stdout") as mock_stdout:
+            mock_stdout.isatty.return_value = False
+            self.assertEqual(_highlight("NIL"), "NIL")
+
+    def test_tty_with_pygments(self) -> None:
+        mock_hl = MagicMock(return_value="colored\n")
+        with patch("sys.stdout") as mock_stdout, \
+             patch("eclpy.__main__._highlight", wraps=_highlight):
+            mock_stdout.isatty.return_value = True
+            with patch.dict("sys.modules", {}):
+                import pygments.formatters
+                import pygments.lexers
+                with patch("pygments.highlight", mock_hl):
+                    result = _highlight("NIL")
+        self.assertEqual(result, "colored")
+
+    def test_tty_without_pygments(self) -> None:
+        with patch("sys.stdout") as mock_stdout, \
+             patch.dict("sys.modules", {"pygments": None}):
+            mock_stdout.isatty.return_value = True
+            self.assertEqual(_highlight("NIL"), "NIL")
 
 
 class EvalAndPrintTests(unittest.TestCase):
