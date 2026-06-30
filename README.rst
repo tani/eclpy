@@ -56,6 +56,42 @@ For everyday use, import ``eclpy.syntax`` as a small expression builder:
 ``L.expr`` takes one Python value. Use ``L.expr(("+", 1, 1))``, not
 ``L.expr("+", 1, 1)``.
 
+CLI (REPL)
+---------
+
+``eclpy`` ships a command-line REPL that starts in the ``eclpy-user`` package,
+which already uses ``ecl-python`` and ``cl``, so ``py-eval`` and ``py-exec``
+are available without a package prefix:
+
+.. code-block:: sh
+
+   $ eclpy
+   ECLPY-USER> (py-eval "1 + 2")
+   3
+   ECLPY-USER> (py-exec "import math")
+   NIL
+   ECLPY-USER> (py-eval "math.pi")
+   3.1415927
+   ECLPY-USER> (in-package :cl-user)
+   #<"COMMON-LISP-USER" package>
+   COMMON-LISP-USER>
+
+The prompt always shows the current package name. Multi-line forms are
+supported; input continues until all parentheses are closed. Readline
+history is saved to ``~/.eclpy_history`` when the session ends.
+
+To evaluate a single expression and exit:
+
+.. code-block:: sh
+
+   eclpy -e "(+ 1 2)"
+
+To run a Lisp source file:
+
+.. code-block:: sh
+
+   eclpy path/to/script.lisp
+
 Use Pythonic Proxies
 --------------------
 
