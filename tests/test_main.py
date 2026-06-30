@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 import tempfile
 import unittest
 from io import StringIO
@@ -184,7 +183,8 @@ class ReplTests(unittest.TestCase):
 
     def test_multiline_form(self) -> None:
         lisp = _fake_lisp(["T"])
-        with patch("builtins.input", side_effect=self._inputs("(defun foo (x)", "  x)", EOFError())), \
+        inputs = self._inputs("(defun foo (x)", "  x)", EOFError())
+        with patch("builtins.input", side_effect=inputs), \
              patch("sys.stdout", new_callable=StringIO) as out:
             _repl(lisp)  # type: ignore[arg-type]
         self.assertIn("T", out.getvalue())
