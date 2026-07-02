@@ -20,3 +20,8 @@ class WasmArtifactBuildHook(BuildHookInterface):
                     "Run `uv run python scripts/build_ecl_wasm.py` before building a wheel."
                 )
                 raise FileNotFoundError(message)
+
+        swank_dir = Path(self.root) / "eclpy" / "swank"
+        if not any(swank_dir.glob("*.lisp")):
+            message = f"missing bundled SWANK source files under {swank_dir}."
+            raise FileNotFoundError(message)

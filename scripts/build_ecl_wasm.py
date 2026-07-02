@@ -23,6 +23,21 @@ OUT_WASM = BUILD / "eclpy" / "ecl_eval.wasm"
 PACKAGE_WASM = ROOT / "eclpy" / "ecl_eval.wasm"
 VENDORED_ASDF = VENDORED_ECL / "contrib" / "asdf" / "asdf.lisp"
 PACKAGE_ASDF = ROOT / "eclpy" / "asdf.lisp"
+VENDORED_SLIME = ROOT / "vendor" / "slime"
+PACKAGE_SWANK_DIR = ROOT / "eclpy" / "swank"
+# Map vendored SLIME source paths to the packaged eclpy/swank/*.lisp filenames.
+# loader.lisp is NOT vendored: it's a project-authored no-compile replacement
+# for the real swank-loader.lisp (see eclpy/swank/loader.lisp docstring).
+SWANK_FILES = {
+    VENDORED_SLIME / "packages.lisp": "packages.lisp",
+    VENDORED_SLIME / "swank" / "backend.lisp": "backend.lisp",
+    VENDORED_SLIME / "swank" / "ecl.lisp": "ecl.lisp",
+    VENDORED_SLIME / "swank" / "gray.lisp": "gray.lisp",
+    VENDORED_SLIME / "swank" / "match.lisp": "match.lisp",
+    VENDORED_SLIME / "swank" / "rpc.lisp": "rpc.lisp",
+    VENDORED_SLIME / "swank.lisp": "swank-core.lisp",
+    VENDORED_SLIME / "contrib" / "swank-repl.lisp": "swank-repl.lisp",
+}
 ECL_WASM_PATCH_DIR = ROOT / "patch" / "ecl-wasm"
 
 ECL_LIBS = [
@@ -188,6 +203,18 @@ def package_asdf() -> Path:
     return PACKAGE_ASDF
 
 
+def package_swank() -> Path:
+    for vendored_path in SWANK_FILES:
+        if not vendored_path.is_file():
+            message = f"missing vendored SLIME source: {vendored_path}"
+            raise SystemExit(message)
+    PACKAGE_SWANK_DIR.mkdir(parents=True, exist_ok=True)
+    for vendored_path, package_name in SWANK_FILES.items():
+        shutil.copy2(vendored_path, PACKAGE_SWANK_DIR / package_name)
+    print(f"packaged {len(SWANK_FILES)} SWANK source files to {PACKAGE_SWANK_DIR}")
+    return PACKAGE_SWANK_DIR
+
+
 def include_root() -> Path:
     for path in (WASM_PREFIX / "include", WASM_PREFIX):
         if (path / "ecl" / "ecl.h").is_file():
@@ -242,6 +269,9 @@ def main() -> None:
     if not VENDORED_ECL.is_dir():
         message = f"missing vendored ECL source: {VENDORED_ECL}"
         raise SystemExit(message)
+    if not VENDORED_SLIME.is_dir():
+        message = f"missing vendored SLIME source: {VENDORED_SLIME}"
+        raise SystemExit(message)
     if not WRAPPER.is_file():
         message = f"missing required file: {WRAPPER}"
         raise SystemExit(message)
@@ -250,6 +280,7 @@ def main() -> None:
     print(f"built {link_wrapper()}")
     package_wasm()
     package_asdf()
+    package_swank()
     if not args.skip_smoke:
         smoke_test()
 

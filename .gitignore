@@ -15,5 +15,16 @@ htmlcov/
 # Generated runtime artifact: ASDF source copied from the vendored ECL tree
 /eclpy/asdf.lisp
 
+# Generated runtime artifacts: SWANK source copied from the vendored SLIME tree
+# (loader.lisp is project-authored and stays tracked)
+/eclpy/swank/backend.lisp
+/eclpy/swank/ecl.lisp
+/eclpy/swank/gray.lisp
+/eclpy/swank/match.lisp
+/eclpy/swank/packages.lisp
+/eclpy/swank/rpc.lisp
+/eclpy/swank/swank-core.lisp
+/eclpy/swank/swank-repl.lisp
+
 # Virtual environments
 .venv

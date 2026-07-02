@@ -145,9 +145,29 @@ def main() -> None:
     )
     parser.add_argument("-e", "--eval", metavar="EXPR", help="evaluate EXPR and exit")
     parser.add_argument("file", nargs="?", metavar="FILE", help="Lisp source file to run")
+    parser.add_argument(
+        "--swank",
+        nargs="?",
+        type=int,
+        const=4005,
+        default=None,
+        metavar="PORT",
+        help=(
+            "start a SWANK/SLIME server on PORT (default 4005) instead of "
+            "evaluating -e/FILE or starting the REPL; blocks until interrupted"
+        ),
+    )
     args = parser.parse_args()
 
     with Lisp() as lisp:
+        if args.swank is not None:
+            print(f"eclpy: starting SWANK on port {args.swank} (Ctrl-C to stop)", file=sys.stderr)
+            try:
+                lisp.start_swank(args.swank)
+            except KeyboardInterrupt:
+                sys.exit(0)
+            return
+
         if args.eval is not None:
             sys.exit(_run(lisp, args.eval))
         elif args.file:

@@ -21,6 +21,54 @@ extern int32_t eclpy_stat(const char *path, int32_t path_len, int32_t *out_kind,
                           double *out_mtime);
 
 #ifdef __wasm__
+__attribute__((import_module("env"), import_name("eclpy_home_directory")))
+#endif
+extern int32_t eclpy_home_directory(char **out_data, int32_t *out_len);
+
+#ifdef __wasm__
+__attribute__((import_module("env"), import_name("eclpy_socket_resolve")))
+#endif
+extern int32_t eclpy_socket_resolve(const char *host, int32_t host_len, char **out_data,
+                                    int32_t *out_len);
+
+#ifdef __wasm__
+__attribute__((import_module("env"), import_name("eclpy_socket_connect")))
+#endif
+extern int32_t eclpy_socket_connect(const char *host, int32_t host_len, int32_t port);
+
+#ifdef __wasm__
+__attribute__((import_module("env"), import_name("eclpy_socket_send")))
+#endif
+extern int32_t eclpy_socket_send(int32_t handle, const char *data, int32_t data_len);
+
+#ifdef __wasm__
+__attribute__((import_module("env"), import_name("eclpy_socket_recv")))
+#endif
+extern int32_t eclpy_socket_recv(int32_t handle, int32_t max_len, char **out_data,
+                                 int32_t *out_len);
+
+#ifdef __wasm__
+__attribute__((import_module("env"), import_name("eclpy_socket_close")))
+#endif
+extern int32_t eclpy_socket_close(int32_t handle);
+
+#ifdef __wasm__
+__attribute__((import_module("env"), import_name("eclpy_socket_listen")))
+#endif
+extern int32_t eclpy_socket_listen(const char *host, int32_t host_len, int32_t port,
+                                   int32_t backlog, int32_t *out_port);
+
+#ifdef __wasm__
+__attribute__((import_module("env"), import_name("eclpy_socket_accept")))
+#endif
+extern int32_t eclpy_socket_accept(int32_t handle);
+
+#ifdef __wasm__
+__attribute__((import_module("env"), import_name("eclpy_socket_poll")))
+#endif
+extern int32_t eclpy_socket_poll(int32_t handle);
+
+#ifdef __wasm__
 __attribute__((import_module("env"), import_name("eclpy_eval_python")))
 #endif
 extern int32_t eclpy_eval_python(const char *source, int32_t source_len, char **out_data,
@@ -127,6 +175,138 @@ static cl_object eclpy_host_stat(cl_object source) {
     return CONS(ecl_make_keyword(kind == 2 ? "DIRECTORY" : "FILE"), date);
 }
 
+static cl_object eclpy_host_read_bytes(cl_object pathname) {
+    cl_object namestring = cl_namestring(pathname);
+    cl_object base = si_coerce_to_base_string(namestring);
+    const char *path = ecl_base_string_pointer_safe(base);
+    char *data = NULL;
+    int32_t data_len = 0;
+
+    int32_t status = eclpy_read_file(path, (int32_t)strlen(path), &data, &data_len);
+    if (status != 0 || data == NULL || data_len < 0) {
+        FEerror("Cannot open ~S.", 1, pathname);
+    }
+    cl_object result = ecl_make_simple_base_string(data, data_len);
+    free(data);
+    return result;
+}
+
+static cl_object eclpy_host_home_directory(void) {
+    char *data = NULL;
+    int32_t data_len = 0;
+
+    int32_t status = eclpy_home_directory(&data, &data_len);
+    if (status != 0 || data == NULL || data_len < 0) {
+        FEerror("Cannot determine host home directory (status ~A).", 1,
+                ecl_make_integer(status));
+    }
+    cl_object result = ecl_make_simple_base_string(data, data_len);
+    free(data);
+    return result;
+}
+
+static cl_object eclpy_socket_resolve_wrapper(cl_object host) {
+    cl_object base = si_coerce_to_base_string(host);
+    const char *text = ecl_base_string_pointer_safe(base);
+    int32_t text_len = (int32_t)base->base_string.fillp;
+    char *data = NULL;
+    int32_t data_len = 0;
+
+    int32_t status = eclpy_socket_resolve(text, text_len, &data, &data_len);
+    if (status != 0 || data == NULL || data_len < 0) {
+        FEerror("Cannot resolve host ~S (status ~A).", 2, host, ecl_make_integer(status));
+    }
+    cl_object result = ecl_make_simple_base_string(data, data_len);
+    free(data);
+    return result;
+}
+
+static cl_object eclpy_socket_connect_wrapper(cl_object host, cl_object port) {
+    cl_object base = si_coerce_to_base_string(host);
+    const char *text = ecl_base_string_pointer_safe(base);
+    int32_t text_len = (int32_t)base->base_string.fillp;
+    int32_t port_number = (int32_t)ecl_fixnum(port);
+
+    int32_t handle = eclpy_socket_connect(text, text_len, port_number);
+    if (handle < 0) {
+        FEerror("Cannot connect to ~S:~A (status ~A).", 3, host, port,
+                ecl_make_integer(-handle));
+    }
+    return ecl_make_fixnum(handle);
+}
+
+static cl_object eclpy_socket_send_wrapper(cl_object handle, cl_object byte_string) {
+    int32_t handle_number = (int32_t)ecl_fixnum(handle);
+    cl_object data_base = si_coerce_to_base_string(byte_string);
+    const char *data = ecl_base_string_pointer_safe(data_base);
+    int32_t data_len = (int32_t)data_base->base_string.fillp;
+
+    int32_t sent = eclpy_socket_send(handle_number, data, data_len);
+    if (sent < 0) {
+        FEerror("Cannot send on socket ~A (status ~A).", 2, handle, ecl_make_integer(-sent));
+    }
+    return ecl_make_fixnum(sent);
+}
+
+static cl_object eclpy_socket_recv_wrapper(cl_object handle, cl_object max_len) {
+    int32_t handle_number = (int32_t)ecl_fixnum(handle);
+    int32_t max_len_number = (int32_t)ecl_fixnum(max_len);
+    char *data = NULL;
+    int32_t data_len = 0;
+
+    int32_t status = eclpy_socket_recv(handle_number, max_len_number, &data, &data_len);
+    if (status != 0 || data == NULL || data_len < 0) {
+        FEerror("Cannot receive on socket ~A (status ~A).", 2, handle, ecl_make_integer(status));
+    }
+    cl_object result = ecl_make_simple_base_string(data, data_len);
+    free(data);
+    return result;
+}
+
+static cl_object eclpy_socket_close_wrapper(cl_object handle) {
+    int32_t handle_number = (int32_t)ecl_fixnum(handle);
+    eclpy_socket_close(handle_number);
+    return ECL_T;
+}
+
+static cl_object eclpy_socket_listen_wrapper(cl_object host, cl_object port, cl_object backlog) {
+    cl_object base = si_coerce_to_base_string(host);
+    const char *text = ecl_base_string_pointer_safe(base);
+    int32_t text_len = (int32_t)base->base_string.fillp;
+    int32_t port_number = (int32_t)ecl_fixnum(port);
+    int32_t backlog_number = (int32_t)ecl_fixnum(backlog);
+    int32_t bound_port = 0;
+
+    int32_t handle = eclpy_socket_listen(text, text_len, port_number, backlog_number,
+                                         &bound_port);
+    if (handle < 0) {
+        FEerror("Cannot listen on ~S:~A (status ~A).", 3, host, port,
+                ecl_make_integer(-handle));
+    }
+    return CONS(ecl_make_fixnum(handle), ecl_make_fixnum(bound_port));
+}
+
+static cl_object eclpy_socket_accept_wrapper(cl_object handle) {
+    int32_t handle_number = (int32_t)ecl_fixnum(handle);
+
+    int32_t connection = eclpy_socket_accept(handle_number);
+    if (connection < 0) {
+        FEerror("Cannot accept on socket ~A (status ~A).", 2, handle,
+                ecl_make_integer(-connection));
+    }
+    return ecl_make_fixnum(connection);
+}
+
+static cl_object eclpy_socket_poll_wrapper(cl_object handle) {
+    int32_t handle_number = (int32_t)ecl_fixnum(handle);
+
+    int32_t ready = eclpy_socket_poll(handle_number);
+    if (ready < 0) {
+        FEerror("Cannot poll socket ~A (status ~A).", 2, handle, ecl_make_integer(-ready));
+    }
+    return ready != 0 ? ECL_T : ECL_NIL;
+}
+
 typedef int32_t (*eclpy_python_bridge)(const char *, int32_t, char **, int32_t *, int32_t *);
 
 static cl_object eclpy_call_python(cl_object source, eclpy_python_bridge callback,
@@ -205,15 +385,38 @@ int32_t eclpy_init(void) {
         "(remove-if-not #'hash-table-p ext:*documentation-pool*))"));
     cl_eval(ecl_read_from_cstring(
         "(defpackage #:ecl-python (:use #:cl) (:shadow #:load) "
-        "(:export #:native-load #:host-stat))"));
+        "(:export #:native-load #:host-stat #:%host-read-bytes #:%host-home-directory "
+        "#:%py-eval #:%py-exec #:%socket-resolve #:%socket-connect #:%socket-send "
+        "#:%socket-recv #:%socket-close #:%socket-listen #:%socket-accept "
+        "#:%socket-poll))"));
     ecl_def_c_function(ecl_read_from_cstring("ecl-python:native-load"),
                        (cl_objectfn_fixed)eclpy_native_load, 5);
     ecl_def_c_function(ecl_read_from_cstring("ecl-python:host-stat"),
                        (cl_objectfn_fixed)eclpy_host_stat, 1);
+    ecl_def_c_function(ecl_read_from_cstring("ecl-python::%host-read-bytes"),
+                       (cl_objectfn_fixed)eclpy_host_read_bytes, 1);
+    ecl_def_c_function(ecl_read_from_cstring("ecl-python::%host-home-directory"),
+                       (cl_objectfn_fixed)eclpy_host_home_directory, 0);
     ecl_def_c_function(ecl_read_from_cstring("ecl-python::%py-eval"),
                        (cl_objectfn_fixed)eclpy_py_eval, 1);
     ecl_def_c_function(ecl_read_from_cstring("ecl-python::%py-exec"),
                        (cl_objectfn_fixed)eclpy_py_exec, 1);
+    ecl_def_c_function(ecl_read_from_cstring("ecl-python::%socket-resolve"),
+                       (cl_objectfn_fixed)eclpy_socket_resolve_wrapper, 1);
+    ecl_def_c_function(ecl_read_from_cstring("ecl-python::%socket-connect"),
+                       (cl_objectfn_fixed)eclpy_socket_connect_wrapper, 2);
+    ecl_def_c_function(ecl_read_from_cstring("ecl-python::%socket-send"),
+                       (cl_objectfn_fixed)eclpy_socket_send_wrapper, 2);
+    ecl_def_c_function(ecl_read_from_cstring("ecl-python::%socket-recv"),
+                       (cl_objectfn_fixed)eclpy_socket_recv_wrapper, 2);
+    ecl_def_c_function(ecl_read_from_cstring("ecl-python::%socket-close"),
+                       (cl_objectfn_fixed)eclpy_socket_close_wrapper, 1);
+    ecl_def_c_function(ecl_read_from_cstring("ecl-python::%socket-listen"),
+                       (cl_objectfn_fixed)eclpy_socket_listen_wrapper, 3);
+    ecl_def_c_function(ecl_read_from_cstring("ecl-python::%socket-accept"),
+                       (cl_objectfn_fixed)eclpy_socket_accept_wrapper, 1);
+    ecl_def_c_function(ecl_read_from_cstring("ecl-python::%socket-poll"),
+                       (cl_objectfn_fixed)eclpy_socket_poll_wrapper, 1);
     eclpy_booted = 1;
     return 0;
 }

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import tempfile
 import threading
 import unittest
@@ -155,6 +156,26 @@ class SessionInternalsTests(unittest.TestCase):
                 hostenv.read_host_file(failed_allocation_caller, 0, len(str(path)), 32, 36),
                 wasmmem.WASI_ENOSYS,
             )
+
+    def test_host_home_directory_import(self) -> None:
+        with patch.multiple(session.wasmtime, Func=FakeFunc, Memory=MutableFakeMemory):
+            self.assertEqual(
+                hostenv.host_home_directory(
+                    FakeCaller({"memory": MutableFakeMemory()}), 32, 36
+                ),
+                wasmmem.WASI_ENOSYS,
+            )
+
+            memory = MutableFakeMemory(size=256)
+            caller = FakeCaller({"memory": memory, "malloc": FakeFunc(lambda caller, size: 100)})
+            status = hostenv.host_home_directory(caller, 32, 36)
+
+            self.assertEqual(status, 0)
+            self.assertEqual(memory.data[32:36], (100).to_bytes(4, "little", signed=True))
+            out_len = int.from_bytes(memory.data[36:40], "little", signed=True)
+            expected = (str(Path.home()) + "/").encode("utf-8")
+            self.assertEqual(out_len, len(expected))
+            self.assertEqual(memory.data[100 : 100 + out_len], expected)
 
     def test_ecl_session_eval_error_paths_without_wasm(self) -> None:
         ecl = EclSession.__new__(EclSession)
@@ -477,6 +498,377 @@ class SessionInternalsTests(unittest.TestCase):
                 json.loads(exec_memory.data[out_ptr : out_ptr + out_len].decode("utf-8")),
                 {"type": "nil"},
             )
+
+    def test_socket_resolve_import(self) -> None:
+        with patch.multiple(session.wasmtime, Func=FakeFunc, Memory=MutableFakeMemory):
+            self.assertEqual(
+                hostenv.socket_resolve(FakeCaller(), 0, -1, 32, 36),
+                wasmmem.WASI_EINVAL,
+            )
+
+            no_malloc_memory = MutableFakeMemory(b"127.0.0.1", size=64)
+            self.assertEqual(
+                hostenv.socket_resolve(
+                    FakeCaller({"memory": no_malloc_memory}), 0, 9, 32, 36
+                ),
+                wasmmem.WASI_ENOSYS,
+            )
+
+            bad_utf8 = MutableFakeMemory(b"\xff\xfe", size=64)
+            caller = FakeCaller(
+                {"memory": bad_utf8, "malloc": FakeFunc(lambda caller, size: 40)}
+            )
+            self.assertEqual(hostenv.socket_resolve(caller, 0, 2, 32, 36), wasmmem.WASI_EINVAL)
+
+            memory = MutableFakeMemory(b"127.0.0.1", size=256)
+            success_caller = FakeCaller(
+                {"memory": memory, "malloc": FakeFunc(lambda caller, size: 100)}
+            )
+            status = hostenv.socket_resolve(success_caller, 0, len("127.0.0.1"), 32, 36)
+            self.assertEqual(status, 0)
+            out_ptr = int.from_bytes(memory.data[32:36], "little", signed=True)
+            out_len = int.from_bytes(memory.data[36:40], "little", signed=True)
+            self.assertEqual(bytes(memory.data[out_ptr : out_ptr + out_len]), b"127.0.0.1")
+
+            invalid_host = "definitely-invalid-host-name.invalid"
+            invalid_memory = MutableFakeMemory(invalid_host.encode(), size=256)
+            invalid_caller = FakeCaller(
+                {"memory": invalid_memory, "malloc": FakeFunc(lambda caller, size: 100)}
+            )
+            self.assertEqual(
+                hostenv.socket_resolve(invalid_caller, 0, len(invalid_host), 32, 36),
+                wasmmem.WASI_EIO,
+            )
+
+    def test_socket_connect_import(self) -> None:
+        with patch.multiple(session.wasmtime, Func=FakeFunc, Memory=MutableFakeMemory):
+            sockets: dict[int, socket.socket] = {}
+            next_handle = [1]
+
+            self.assertEqual(
+                hostenv.socket_connect(FakeCaller(), sockets, next_handle, 0, -1, 80),
+                -wasmmem.WASI_EINVAL,
+            )
+
+            memory = MutableFakeMemory(b"127.0.0.1", size=64)
+            self.assertEqual(
+                hostenv.socket_connect(
+                    FakeCaller({"memory": memory}), sockets, next_handle, 0, 9, -1
+                ),
+                -wasmmem.WASI_EINVAL,
+            )
+
+            bad_utf8 = MutableFakeMemory(b"\xff\xfe", size=64)
+            self.assertEqual(
+                hostenv.socket_connect(
+                    FakeCaller({"memory": bad_utf8}), sockets, next_handle, 0, 2, 80
+                ),
+                -wasmmem.WASI_EINVAL,
+            )
+
+            listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            listener.bind(("127.0.0.1", 0))
+            listener.listen(1)
+            port = listener.getsockname()[1]
+            accept_thread = threading.Thread(
+                target=lambda: listener.accept()[0].close(), daemon=True
+            )
+            accept_thread.start()
+            try:
+                host_memory = MutableFakeMemory(b"127.0.0.1", size=64)
+                handle = hostenv.socket_connect(
+                    FakeCaller({"memory": host_memory}), sockets, next_handle, 0, 9, port
+                )
+                self.assertGreater(handle, 0)
+                self.assertIn(handle, sockets)
+                self.assertEqual(next_handle[0], handle + 1)
+            finally:
+                accept_thread.join(timeout=5)
+                listener.close()
+                stray = sockets.pop(handle, None)
+                if stray is not None:
+                    stray.close()
+
+            refused_listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            refused_listener.bind(("127.0.0.1", 0))
+            refused_port = refused_listener.getsockname()[1]
+            refused_listener.close()
+            refused_memory = MutableFakeMemory(b"127.0.0.1", size=64)
+            self.assertEqual(
+                hostenv.socket_connect(
+                    FakeCaller({"memory": refused_memory}),
+                    sockets,
+                    next_handle,
+                    0,
+                    9,
+                    refused_port,
+                ),
+                -wasmmem.WASI_EIO,
+            )
+
+    def test_socket_send_recv_close_round_trip(self) -> None:
+        with patch.multiple(session.wasmtime, Func=FakeFunc, Memory=MutableFakeMemory):
+            server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            server.bind(("127.0.0.1", 0))
+            server.listen(1)
+            port = server.getsockname()[1]
+            accepted: dict[str, socket.socket] = {}
+            received: dict[str, bytes] = {}
+
+            def accept_and_echo() -> None:
+                connection, _ = server.accept()
+                accepted["connection"] = connection
+                received["data"] = connection.recv(4096)
+                connection.sendall(b"pong")
+
+            server_thread = threading.Thread(target=accept_and_echo, daemon=True)
+            server_thread.start()
+
+            sockets: dict[int, socket.socket] = {}
+            next_handle = [1]
+            memory = MutableFakeMemory(b"127.0.0.1ping", size=64)
+            handle = hostenv.socket_connect(
+                FakeCaller({"memory": memory}), sockets, next_handle, 0, 9, port
+            )
+            self.assertGreater(handle, 0)
+
+            send_caller = FakeCaller({"memory": memory})
+            sent = hostenv.socket_send(send_caller, sockets, handle, 9, 4)
+            self.assertEqual(sent, 4)
+
+            self.assertEqual(
+                hostenv.socket_send(send_caller, sockets, 99999, 9, 4),
+                -wasmmem.WASI_EINVAL,
+            )
+            self.assertEqual(
+                hostenv.socket_send(send_caller, sockets, handle, 9, -1),
+                -wasmmem.WASI_EINVAL,
+            )
+
+            server_thread.join(timeout=5)
+            self.assertEqual(received.get("data"), b"ping")
+
+            recv_memory = MutableFakeMemory(size=256)
+            recv_caller = FakeCaller(
+                {"memory": recv_memory, "malloc": FakeFunc(lambda caller, size: 100)}
+            )
+            status = hostenv.socket_recv(recv_caller, sockets, handle, 1024, 32, 36)
+            self.assertEqual(status, 0)
+            out_ptr = int.from_bytes(recv_memory.data[32:36], "little", signed=True)
+            out_len = int.from_bytes(recv_memory.data[36:40], "little", signed=True)
+            self.assertEqual(bytes(recv_memory.data[out_ptr : out_ptr + out_len]), b"pong")
+
+            self.assertEqual(
+                hostenv.socket_recv(recv_caller, sockets, 99999, 1024, 32, 36),
+                wasmmem.WASI_EINVAL,
+            )
+            self.assertEqual(
+                hostenv.socket_recv(recv_caller, sockets, handle, 0, 32, 36),
+                wasmmem.WASI_EINVAL,
+            )
+            self.assertEqual(
+                hostenv.socket_recv(
+                    FakeCaller({"memory": recv_memory}), sockets, handle, 1024, 32, 36
+                ),
+                wasmmem.WASI_ENOSYS,
+            )
+
+            accepted["connection"].close()
+            eof_status = hostenv.socket_recv(recv_caller, sockets, handle, 1024, 32, 36)
+            self.assertEqual(eof_status, 0)
+            eof_len = int.from_bytes(recv_memory.data[36:40], "little", signed=True)
+            self.assertEqual(eof_len, 0)
+
+            self.assertEqual(hostenv.socket_close(sockets, handle), 0)
+            self.assertNotIn(handle, sockets)
+            self.assertEqual(hostenv.socket_close(sockets, handle), 0)
+            self.assertEqual(hostenv.socket_close(sockets, 99999), 0)
+
+            server.close()
+
+    def test_socket_send_reports_os_error(self) -> None:
+        with patch.multiple(session.wasmtime, Func=FakeFunc, Memory=MutableFakeMemory):
+            local_socket, remote_socket = socket.socketpair()
+            sockets = {1: local_socket}
+            remote_socket.close()
+            local_socket.close()
+            memory = MutableFakeMemory(b"data", size=64)
+            caller = FakeCaller({"memory": memory})
+            self.assertEqual(
+                hostenv.socket_send(caller, sockets, 1, 0, 4),
+                -wasmmem.WASI_EIO,
+            )
+
+    def test_socket_recv_reports_os_error(self) -> None:
+        with patch.multiple(session.wasmtime, Func=FakeFunc, Memory=MutableFakeMemory):
+            local_socket, remote_socket = socket.socketpair()
+            sockets = {1: local_socket}
+            remote_socket.close()
+            local_socket.close()
+            memory = MutableFakeMemory(size=64)
+            caller = FakeCaller(
+                {"memory": memory, "malloc": FakeFunc(lambda caller, size: 40)}
+            )
+            self.assertEqual(
+                hostenv.socket_recv(caller, sockets, 1, 1024, 32, 36),
+                wasmmem.WASI_EIO,
+            )
+
+    def test_socket_listen_import(self) -> None:
+        with patch.multiple(session.wasmtime, Func=FakeFunc, Memory=MutableFakeMemory):
+            sockets: dict[int, socket.socket] = {}
+            next_handle = [1]
+
+            self.assertEqual(
+                hostenv.socket_listen(FakeCaller(), sockets, next_handle, 0, -1, 0, 1, 40),
+                -wasmmem.WASI_EINVAL,
+            )
+            self.assertEqual(
+                hostenv.socket_listen(FakeCaller(), sockets, next_handle, 0, 9, -1, 1, 40),
+                -wasmmem.WASI_EINVAL,
+            )
+            self.assertEqual(
+                hostenv.socket_listen(FakeCaller(), sockets, next_handle, 0, 9, 0, 0, 40),
+                -wasmmem.WASI_EINVAL,
+            )
+
+            bad_utf8 = MutableFakeMemory(b"\xff\xfe", size=64)
+            self.assertEqual(
+                hostenv.socket_listen(
+                    FakeCaller({"memory": bad_utf8}), sockets, next_handle, 0, 2, 0, 1, 40
+                ),
+                -wasmmem.WASI_EINVAL,
+            )
+
+            unroutable_memory = MutableFakeMemory(b"256.256.256.256", size=64)
+            self.assertEqual(
+                hostenv.socket_listen(
+                    FakeCaller({"memory": unroutable_memory}),
+                    sockets,
+                    next_handle,
+                    0,
+                    15,
+                    0,
+                    1,
+                    40,
+                ),
+                -wasmmem.WASI_EIO,
+            )
+
+            listen_memory = MutableFakeMemory(b"127.0.0.1", size=64)
+            handle = hostenv.socket_listen(
+                FakeCaller({"memory": listen_memory}), sockets, next_handle, 0, 9, 0, 1, 32
+            )
+            self.assertGreater(handle, 0)
+            self.assertIn(handle, sockets)
+            bound_port = int.from_bytes(listen_memory.data[32:36], "little", signed=True)
+            self.assertGreater(bound_port, 0)
+
+            sockets[handle].close()
+            del sockets[handle]
+
+    def test_socket_accept_and_poll_import(self) -> None:
+        with patch.multiple(session.wasmtime, Func=FakeFunc, Memory=MutableFakeMemory):
+            server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            server.bind(("127.0.0.1", 0))
+            server.listen(1)
+            port = server.getsockname()[1]
+
+            sockets: dict[int, socket.socket] = {1: server}
+            next_handle = [2]
+
+            self.assertEqual(hostenv.socket_poll(sockets, 1), 0)
+            self.assertEqual(hostenv.socket_poll(sockets, 99999), -wasmmem.WASI_EINVAL)
+            self.assertEqual(
+                hostenv.socket_accept(sockets, next_handle, 99999), -wasmmem.WASI_EINVAL
+            )
+
+            client = socket.create_connection(("127.0.0.1", port), timeout=5)
+            try:
+                deadline = threading.Event()
+
+                def wait_ready() -> None:
+                    for _ in range(50):
+                        if hostenv.socket_poll(sockets, 1) == 1:
+                            deadline.set()
+                            return
+                        threading.Event().wait(0.05)
+
+                waiter = threading.Thread(target=wait_ready, daemon=True)
+                waiter.start()
+                waiter.join(timeout=5)
+                self.assertTrue(deadline.is_set())
+
+                new_handle = hostenv.socket_accept(sockets, next_handle, 1)
+                self.assertGreater(new_handle, 0)
+                self.assertIn(new_handle, sockets)
+                sockets[new_handle].close()
+                del sockets[new_handle]
+            finally:
+                client.close()
+                server.close()
+
+    def test_socket_accept_reports_os_error(self) -> None:
+        with patch.multiple(session.wasmtime, Func=FakeFunc, Memory=MutableFakeMemory):
+            local_socket, remote_socket = socket.socketpair()
+            sockets = {1: local_socket}
+            next_handle = [2]
+            remote_socket.close()
+
+            self.assertEqual(
+                hostenv.socket_accept(sockets, next_handle, 1), -wasmmem.WASI_EIO
+            )
+            local_socket.close()
+
+    def test_socket_env_import_dispatch(self) -> None:
+        with patch.multiple(session.wasmtime, Func=FakeFunc, Memory=MutableFakeMemory):
+            server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            server.bind(("127.0.0.1", 0))
+            server.listen(1)
+            port = server.getsockname()[1]
+            server_thread = threading.Thread(
+                target=lambda: server.accept()[0].close(), daemon=True
+            )
+            server_thread.start()
+
+            globals_: dict[str, object] = {"__builtins__": __builtins__}
+            sockets: dict[int, socket.socket] = {}
+            next_handle = [1]
+            resolve_callback = hostenv.env_import(
+                "eclpy_socket_resolve",
+                has_result=True,
+                py_globals=globals_,
+                sockets=sockets,
+                next_handle=next_handle,
+            )
+            connect_callback = hostenv.env_import(
+                "eclpy_socket_connect",
+                has_result=True,
+                py_globals=globals_,
+                sockets=sockets,
+                next_handle=next_handle,
+            )
+            close_callback = hostenv.env_import(
+                "eclpy_socket_close",
+                has_result=True,
+                py_globals=globals_,
+                sockets=sockets,
+                next_handle=next_handle,
+            )
+
+            resolve_memory = MutableFakeMemory(b"127.0.0.1", size=256)
+            resolve_caller = FakeCaller(
+                {"memory": resolve_memory, "malloc": FakeFunc(lambda caller, size: 100)}
+            )
+            self.assertEqual(resolve_callback(resolve_caller, 0, 9, 32, 36), 0)
+
+            connect_memory = MutableFakeMemory(b"127.0.0.1", size=64)
+            handle = connect_callback(FakeCaller({"memory": connect_memory}), 0, 9, port)
+            self.assertGreater(handle, 0)
+
+            self.assertEqual(close_callback(FakeCaller(), 1), 0)
+            server_thread.join(timeout=5)
+            server.close()
 
 
 if __name__ == "__main__":

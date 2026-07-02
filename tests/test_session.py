@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from fractions import Fraction
 from pathlib import Path
@@ -444,6 +446,66 @@ class LispApiTests(unittest.TestCase):
         lisp.close()
 
         self.assertTrue(reference.released)
+
+    def test_lisp_tcp_socket_client_round_trip(self) -> None:
+        response = b"HTTP/1.0 200 OK\r\nContent-Length: 5\r\n\r\nhello"
+        received: dict[str, bytes] = {}
+
+        def serve(server_socket: socket.socket) -> None:
+            connection, _ = server_socket.accept()
+            with connection:
+                received["request"] = connection.recv(4096)
+                connection.sendall(response)
+
+        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_socket.bind(("127.0.0.1", 0))
+        server_socket.listen(1)
+        port = server_socket.getsockname()[1]
+        server_thread = threading.Thread(target=serve, args=(server_socket,), daemon=True)
+        server_thread.start()
+
+        try:
+            with Lisp(require_wasm()) as lisp:
+                lisp.eval(SExp.raw("(require 'sockets)"))
+                self.assertIs(
+                    lisp.eval(SExp.raw("(and (find-package :sb-bsd-sockets) t)")), True
+                )
+                self.assertIs(
+                    lisp.eval(SExp.raw("(and (find-class 'sb-bsd-sockets:inet-socket) t)")),
+                    True,
+                )
+                # This is the client-side sb-bsd-sockets sequence swank/ecl.lisp's
+                # own TCP server backend mirrors for accept/listen (see runtime.lisp).
+                form = f"""
+                (let* ((host-ent (sb-bsd-sockets:get-host-by-name "127.0.0.1"))
+                       (address (sb-bsd-sockets:host-ent-address host-ent))
+                       (socket (make-instance 'sb-bsd-sockets:inet-socket
+                                              :protocol :tcp :type :stream)))
+                  (sb-bsd-sockets:socket-connect socket address {port})
+                  (let ((stream (sb-bsd-sockets:socket-make-stream
+                                 socket :element-type '(unsigned-byte 8)
+                                 :input t :output t :buffering :full)))
+                    (write-sequence
+                     (map '(vector (unsigned-byte 8)) #'char-code
+                          (format nil "GET / HTTP/1.0~C~C~C~C"
+                                  #\\Return #\\Newline #\\Return #\\Newline))
+                     stream)
+                    (finish-output stream)
+                    (let ((buffer (make-array 1024 :element-type '(unsigned-byte 8)
+                                              :fill-pointer 1024)))
+                      (let ((count (read-sequence buffer stream)))
+                        (close stream)
+                        (map 'string #'code-char (subseq buffer 0 count))))))
+                """
+                reply = lisp.eval(SExp.raw(form))
+                self.assertIn("hello", reply)
+                # SOCKETS is already provided, so requiring it again loads nothing new.
+                self.assertEqual(lisp.eval(SExp.raw("(require 'sockets)")), List())
+        finally:
+            server_thread.join(timeout=5)
+            server_socket.close()
+
+        self.assertEqual(received.get("request", b"")[:14], b"GET / HTTP/1.0")
 
 
 if __name__ == "__main__":

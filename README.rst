@@ -92,6 +92,13 @@ To run a Lisp source file:
 
    eclpy path/to/script.lisp
 
+To start a SWANK/SLIME server instead of the REPL (see *SWANK/SLIME* below):
+
+.. code-block:: sh
+
+   eclpy --swank            # port 4005
+   eclpy --swank 4006       # explicit port
+
 Use Pythonic Proxies
 --------------------
 
@@ -171,6 +178,7 @@ The modules are split by layer:
    eclpy/hostenv.py     # WASM env imports: files, stat, Python eval/exec
    eclpy/wasmmem.py     # WASM linear-memory helpers
    eclpy/runtime.lisp   # Lisp-side helper package source
+   eclpy/swank/         # bundled upstream SWANK server source
 
 For Heavy Users
 ===============
@@ -387,6 +395,56 @@ Shelling out, compiling foreign code, or relying on implementation-specific
 native build steps is out of scope. Prefer source-only systems whose components
 can be loaded directly by ECL inside the packaged WASM runtime.
 
+SWANK/SLIME
+-----------
+
+``eclpy`` bundles the unmodified upstream SWANK server source (from the SLIME
+project) so Emacs can connect to a running ``Lisp`` session as a normal SLIME
+REPL. Start the server with ``Lisp.start_swank``, which blocks the calling
+thread for as long as it serves requests, so run it from a background thread:
+
+.. code-block:: python
+
+   import threading
+
+   import eclpy
+
+   lisp = eclpy.Lisp()
+   thread = threading.Thread(target=lisp.start_swank, kwargs={"port": 4005})
+   thread.daemon = True
+   thread.start()
+
+Then, in Emacs: ``M-x slime-connect RET 127.0.0.1 RET 4005 RET``.
+
+From the command line, ``eclpy --swank`` (or ``eclpy --swank PORT``) starts
+the server directly instead of the REPL, printing the port and blocking
+until interrupted with Ctrl-C.
+
+``start_swank`` bypasses the JSON evaluation protocol used by ``Lisp.eval``
+and calls the session directly, so unhandled conditions raised while
+evaluating a SWANK request reach ECL's native condition system instead of
+being caught and reported back as an ``EclError``.
+
+Limitations in the WASM Sandbox
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+* **No native compilation.** The sandbox has no C compiler and cannot
+  ``dlopen`` shared objects, so ``compile-string-for-emacs`` and
+  ``compile-file-for-emacs`` evaluate source directly instead of compiling to
+  a FASL. Compiler errors and warnings are still reported to Emacs as
+  compiler notes.
+* **No interactive debugger (SLDB).** Walking ECL's raw interpreter
+  history/frame stacks for a backtrace (``SI::IHS-TOP`` / ``SI::FRS-TOP``)
+  triggers a hard WebAssembly memory-fault trap under this build, not a
+  catchable Lisp condition. Unhandled errors during a SWANK request abort
+  back to the top level and are reported to Emacs as a failed request,
+  instead of opening an interactive debugger buffer. The connection and the
+  underlying ECL session remain usable afterward.
+* **Single-threaded.** This ECL WASM build has no real threads
+  (``:threads`` is absent from ``*features*``), so the server always runs
+  with ``:communication-style nil``: one blocking, synchronous request loop
+  per connection, exactly like a native single-threaded Lisp bound to Emacs.
+
 Runtime Selection
 -----------------
 
@@ -554,16 +612,19 @@ The tests cover raw low-level evaluation, strict ``SExp`` evaluation, Syntax API
 shorthand evaluation, package lookup, macros and special forms, bidirectional
 Python/Lisp evaluation, object-shaped JSON protocol conversion, cons/list conversion,
 higher-order Lisp functions, reference lifecycle, ``(require 'asdf)`` module
-loading, missing runtime errors, Lisp-side exceptions, and internal runtime
-error paths. Coverage is configured to fail below 100% for the Python package.
+loading, missing runtime errors, Lisp-side exceptions, internal runtime
+error paths, and the SWANK-RPC wire protocol served by ``Lisp.start_swank``.
+Coverage is configured to fail below 100% for the Python package.
 
 Build the WASM Runtime
 ----------------------
 
 The wheel includes ``eclpy/ecl_eval.wasm``, but that file must be generated before
-building a distribution. The ECL source is vendored in ``vendor/ecl-26.5.5``; no
-source tarball is required. Local ECL build patches are kept under ``patch/`` and
-applied only to copied source trees under ``build/``.
+building a distribution. The ECL source is vendored in ``vendor/ecl-26.5.5`` and
+the SWANK server source is vendored in ``vendor/slime``; no source tarball or
+network fetch is required to build the wheel itself. Local ECL build patches
+are kept under ``patch/`` and applied only to copied source trees under
+``build/``.
 
 .. code-block:: sh
 
@@ -577,6 +638,7 @@ The script:
 * links ``native/eclpy_eval.c`` into ``build/eclpy/ecl_eval.wasm``;
 * copies the runtime to ``eclpy/ecl_eval.wasm`` for wheel packaging;
 * copies the vendored ASDF source to ``eclpy/asdf.lisp``;
+* copies the vendored SWANK source files from ``vendor/slime`` to ``eclpy/swank/*.lisp``;
 * runs a Python smoke test through ``EclSession()``.
 
 Build a Wheel
@@ -607,6 +669,15 @@ The wheel should contain:
    eclpy/sexp.py
    eclpy/ecl_eval.wasm
    eclpy/asdf.lisp
+   eclpy/swank/loader.lisp
+   eclpy/swank/packages.lisp
+   eclpy/swank/backend.lisp
+   eclpy/swank/ecl.lisp
+   eclpy/swank/gray.lisp
+   eclpy/swank/match.lisp
+   eclpy/swank/rpc.lisp
+   eclpy/swank/swank-core.lisp
+   eclpy/swank/swank-repl.lisp
 
 You can smoke-test the built wheel outside the source tree:
 

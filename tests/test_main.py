@@ -392,3 +392,41 @@ class MainTests(unittest.TestCase):
              patch("builtins.input", side_effect=lambda p="": (_ for _ in ()).throw(EOFError())), \
              patch("sys.stdout", new_callable=StringIO):
             main()
+
+    def test_swank_flag_default_port(self) -> None:
+        lisp = self._patched_lisp([])
+        with patch("eclpy.__main__.Lisp", return_value=lisp), \
+             patch("sys.argv", ["eclpy", "--swank"]), \
+             patch("sys.stderr", new_callable=StringIO) as err:
+            main()
+        lisp.start_swank.assert_called_once_with(4005)
+        self.assertIn("starting SWANK on port 4005", err.getvalue())
+
+    def test_swank_flag_explicit_port(self) -> None:
+        lisp = self._patched_lisp([])
+        with patch("eclpy.__main__.Lisp", return_value=lisp), \
+             patch("sys.argv", ["eclpy", "--swank", "4006"]), \
+             patch("sys.stderr", new_callable=StringIO) as err:
+            main()
+        lisp.start_swank.assert_called_once_with(4006)
+        self.assertIn("starting SWANK on port 4006", err.getvalue())
+
+    def test_swank_flag_keyboard_interrupt_exits_zero(self) -> None:
+        lisp = self._patched_lisp([])
+        lisp.start_swank.side_effect = KeyboardInterrupt
+        with patch("eclpy.__main__.Lisp", return_value=lisp), \
+             patch("sys.argv", ["eclpy", "--swank"]), \
+             patch("sys.stderr", new_callable=StringIO):
+            with self.assertRaises(SystemExit) as ctx:
+                main()
+        self.assertEqual(ctx.exception.code, 0)
+
+    def test_swank_flag_skips_eval_and_file(self) -> None:
+        lisp = self._patched_lisp([])
+        with patch("eclpy.__main__.Lisp", return_value=lisp), \
+             patch("sys.argv", ["eclpy", "--swank", "-e", "(+ 1 1)"]), \
+             patch("sys.stderr", new_callable=StringIO), \
+             patch("eclpy.__main__._run") as mock_run:
+            main()
+        lisp.start_swank.assert_called_once_with(4005)
+        mock_run.assert_not_called()

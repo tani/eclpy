@@ -33,6 +33,7 @@ artifacts = [
     "eclpy/ecl_eval.wasm",
     "eclpy/asdf.lisp",
     "eclpy/runtime.lisp",
+    "eclpy/swank/*.lisp",
 ]
 
 [tool.hatch.build.targets.sdist]
@@ -68,6 +69,7 @@ exclude = [
 "eclpy/ecl_eval.wasm" = "eclpy/ecl_eval.wasm"
 "eclpy/asdf.lisp" = "eclpy/asdf.lisp"
 "eclpy/runtime.lisp" = "eclpy/runtime.lisp"
+"eclpy/swank" = "eclpy/swank"
 
 [tool.hatch.build.hooks.custom]
 path = "scripts/hatch_build.py"

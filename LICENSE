@@ -60,3 +60,12 @@
   ecl-devel@common-lisp.net.
 
 ---- END OF COPYRIGHT FOR THE ECL CORE ENVIRONMENT ------------------
+
+---- BEGINNING OF COPYRIGHT FOR SWANK/SLIME (eclpy/swank/*.lisp) ----
+
+  This code (the SWANK server, from the SLIME project) has been placed
+  in the Public Domain. All warranties are disclaimed.
+
+  https://github.com/slime/slime
+
+---- END OF COPYRIGHT FOR SWANK/SLIME --------------------------------

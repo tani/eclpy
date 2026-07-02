@@ -9,6 +9,7 @@ import wasmtime
 from .errors import EclError
 
 WASI_EINVAL = 28
+WASI_EIO = 29
 WASI_ENOENT = 44
 WASI_ENOSYS = 52
 WASI_ERANGE = 68

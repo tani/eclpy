@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from os import PathLike
 
 ASDF_SOURCE = Path(__file__).with_name("asdf.lisp")
+SWANK_SOURCE_DIRECTORY = Path(__file__).with_name("swank")
 
 
 class Lisp:
@@ -40,6 +41,12 @@ class Lisp:
             SExp.raw(f"#p{SExp.string(str(ASDF_SOURCE))}"),
         )
         self.session.eval(str(form))
+        swank_form = SExp.list(
+            SExp.atom("setf"),
+            SExp.atom("ecl-python:*swank-source-directory*"),
+            SExp.raw(f"#p{SExp.string(str(SWANK_SOURCE_DIRECTORY) + '/')}"),
+        )
+        self.session.eval(str(swank_form))
 
     def eval(self, form: Any) -> Any:
         """Evaluate an explicit S-expression."""
@@ -47,6 +54,28 @@ class Lisp:
             message = "Lisp.eval only accepts SExp; use eclpy.SExp.* or eclpy.syntax.expr(...)"
             raise TypeError(message)
         return self._eval_sexp(form)
+
+    def start_swank(self, port: int = 4005, *, dont_close: bool = True) -> None:
+        """Start a SWANK server and block the calling thread serving requests.
+
+        Unlike :meth:`eval`, this bypasses the JSON evaluation protocol and
+        calls the session directly. ``eval``'s ``ecl-python:evaluate`` wraps
+        every call in a ``handler-case`` that traps *all* conditions so they
+        can be reported back to Python as an :class:`EclError` -- but SWANK
+        needs unhandled conditions raised inside a request to reach ECL's
+        native ``*debugger-hook*`` so its own SLDB debugger can intercept
+        them instead. Run this from a background thread; it does not return
+        while the server is serving requests (i.e. whenever ``dont_close``
+        is true, which is the default).
+        """
+        form = SExp.list(
+            SExp.atom("ecl-python:start-swank"),
+            SExp.keyword("port"),
+            SExp.integer(port),
+            SExp.keyword("dont-close"),
+            SExp.atom("t") if dont_close else SExp.atom("nil"),
+        )
+        self.session.eval(str(form))
 
     def close(self) -> None:
         """Release Lisp references and close the owned ECL session."""
