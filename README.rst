@@ -433,13 +433,16 @@ Limitations in the WASM Sandbox
   ``compile-file-for-emacs`` evaluate source directly instead of compiling to
   a FASL. Compiler errors and warnings are still reported to Emacs as
   compiler notes.
-* **No interactive debugger (SLDB).** Walking ECL's raw interpreter
-  history/frame stacks for a backtrace (``SI::IHS-TOP`` / ``SI::FRS-TOP``)
-  triggers a hard WebAssembly memory-fault trap under this build, not a
-  catchable Lisp condition. Unhandled errors during a SWANK request abort
-  back to the top level and are reported to Emacs as a failed request,
-  instead of opening an interactive debugger buffer. The connection and the
-  underlying ECL session remain usable afterward.
+* **Interactive debugger (SLDB) works, with one patched primitive.** Walking
+  ECL's raw interpreter history/frame stacks for a backtrace
+  (``SI::IHS-TOP`` / ``SI::FRS-TOP``) works under this build, except reading
+  interpreter-history-stack frame 0's environment, which is a sentinel with
+  no real frame and hard-traps the WASM instance (not a catchable Lisp
+  condition) rather than erroring cleanly as on native platforms.
+  ``start_swank`` patches ``call-with-debugging-environment`` to skip that
+  one index; the rest of SLDB (backtraces, restarts, frame locals,
+  ``eval-in-frame``) runs unmodified. Unhandled errors during a SWANK
+  request open a normal interactive debugger buffer in Emacs.
 * **Single-threaded.** This ECL WASM build has no real threads
   (``:threads`` is absent from ``*features*``), so the server always runs
   with ``:communication-style nil``: one blocking, synchronous request loop

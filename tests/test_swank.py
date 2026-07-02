@@ -183,12 +183,46 @@ class SwankServerTests(unittest.TestCase):
         self.assertIn("2", further_reply)
         self.assertIn("(:return (:ok", further_reply)
 
-    def test_runtime_error_aborts_without_crashing_session(self) -> None:
+    def test_runtime_error_enters_sldb_and_recovers_on_abort(self) -> None:
         self._create_repl()
 
-        reply = self._rex('(swank-repl:listener-eval "(error \\"boom\\")")')
+        self._request_id += 1
+        error_request_id = self._request_id
+        _send_rex(
+            self.client_socket,
+            '(swank-repl:listener-eval "(error \\"boom\\")")',
+            error_request_id,
+        )
 
-        self.assertIn(":abort", reply)
+        debug_message = ""
+        while not debug_message.startswith("(:debug "):
+            debug_message = _read_message(self.client_socket)
+        self.assertIn("SIMPLE-ERROR", debug_message)
+        self.assertIn("boom", debug_message)
+
+        debug_activate_message = ""
+        while not debug_activate_message.startswith("(:debug-activate "):
+            debug_activate_message = _read_message(self.client_socket)
+
+        backtrace_reply = self._rex("(swank:backtrace 0 5)")
+        self.assertIn("(:return (:ok", backtrace_reply)
+        self.assertIn("START-SWANK", backtrace_reply)
+
+        abort_reply = self._rex("(swank:sldb-abort)")
+        self.assertIn("(:return (:abort", abort_reply)
+
+        debug_return_message = ""
+        while not debug_return_message.startswith("(:debug-return "):
+            debug_return_message = _read_message(self.client_socket)
+
+        original_return_message = ""
+        while not (
+            original_return_message.startswith("(:return ")
+            and f" {error_request_id})" in original_return_message
+        ):
+            original_return_message = _read_message(self.client_socket)
+        self.assertIn(":abort", original_return_message)
+
         self.assertTrue(self.server_thread.is_alive())
 
         further_reply = self._rex('(swank-repl:listener-eval "(+ 5 5)")')

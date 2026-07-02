@@ -500,25 +500,41 @@ port number once the server socket is listening."
       (not failure-p))))
 "))
     ;; ECL's WASM build lowers its pervasive setjmp/longjmp to native WASM
-    ;; exceptions (see scripts/build_ecl_wasm.py); SWANK's interactive
+    ;; exceptions (see scripts/build_ecl_wasm.py). SWANK's interactive
     ;; debugger (SLDB) needs SI::IHS-TOP/SI::FRS-TOP to walk the raw
-    ;; interpreter history/frame stacks for backtraces, and that walk
-    ;; corrupts memory under this build (a hard WASM trap, not a
-    ;; catchable Lisp condition -- it kills the whole session). Replace
-    ;; the debugger hook so unhandled errors abort straight back to
-    ;; SWANK's top level instead of ever invoking the interactive
-    ;; debugger loop or its backtrace machinery; the error message and
-    ;; condition type still reach Emacs via the RPC's (:abort ...) reply.
+    ;; interpreter history/frame stacks for backtraces; CALL-WITH-DEBUGGING-
+    ;; ENVIRONMENT collects frame 0's environment via (SI::IHS-ENV 0), but
+    ;; frame 0 is the sentinel base of the interpreter history stack with no
+    ;; real environment, and reading it hard-traps the WASM instance (not a
+    ;; catchable Lisp condition) instead of erroring cleanly. Guard index 0
+    ;; only; higher indices are real interpreter frames and work unmodified.
     (eval-source-forms "
-(in-package #:swank)
+(in-package #:swank/ecl)
 
-(defun swank-debugger-hook (condition hook)
-  (declare (ignore hook))
-  (let ((restart (or (and *sldb-quit-restart* (find-restart *sldb-quit-restart*))
-                      (car (last (compute-restarts condition))))))
-    (if restart
-        (invoke-restart restart)
-        (error condition))))
+(defimplementation call-with-debugging-environment (debugger-loop-fn)
+  (declare (type function debugger-loop-fn))
+  (let* ((*ihs-top* (ihs-top))
+         (*ihs-current* *ihs-top*)
+         (*frs-base* (or (sch-frs-base *frs-top* *ihs-base*) (1+ (frs-top))))
+         (*frs-top* (frs-top))
+         (*tpl-level* (1+ *tpl-level*))
+         (*backtrace* (loop for ihs from 0 below *ihs-top*
+                            collect (list (if (plusp ihs) (si::ihs-fun ihs) nil)
+                                          (if (plusp ihs) (si::ihs-env ihs) nil)
+                                          nil))))
+    (declare (special *ihs-current*))
+    (loop for f from *frs-base* until *frs-top*
+          do (let ((i (- (si::frs-ihs f) *ihs-base* 1)))
+               (when (plusp i)
+                 (let* ((x (elt *backtrace* i))
+                        (name (si::frs-tag f)))
+                   (unless (si::fixnump name)
+                     (push name (third x)))))))
+    (setf *backtrace* (remove-if (function is-ignorable-fun-p) (nreverse *backtrace*)))
+    (set-break-env)
+    (set-current-ihs)
+    (let ((*ihs-base* *ihs-top*))
+      (funcall debugger-loop-fn))))
 ")
   (setf (symbol-value (intern "*COMMUNICATION-STYLE*" "SWANK")) nil)
   ;; The WASM sandbox's *standard-input* is a FILE-STREAM whose LISTEN

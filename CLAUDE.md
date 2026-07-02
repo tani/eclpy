@@ -185,7 +185,7 @@ The bridge uses a **single object-shaped JSON protocol** for all values:
 - **`ecl-python:value(id) / release-object(id)`** - Reference lifecycle
 - **ASDF file bridge**: `load`, `probe-file`, `truename`, `file-write-date` shimmed to read host files
 - **`sb-bsd-sockets` package**: minimal `socket`/`inet-socket` classes and `socket-bind`/`socket-listen`/`socket-accept`/`socket-name`/`sockopt-reuse-address` backed by the `%socket-*` host bridge primitives, matching the real API the vendored `swank/ecl.lisp` drives unmodified
-- **`ecl-python:start-swank(&key port dont-close)`** - Loads bundled SWANK source from `*swank-source-directory*` (once per session), patches `swank-compile-string`/`swank-compile-file` to EVAL source instead of `compile-file` (no native compiler in the sandbox), replaces `swank-debugger-hook` to abort to top level instead of entering SLDB (its backtrace walk over `SI::IHS-TOP`/`SI::FRS-TOP` traps the WASM instance), then calls `SWANK:CREATE-SERVER` with `:style nil` (`:communication-style nil`, no real threads in this build). Blocks the calling thread.
+- **`ecl-python:start-swank(&key port dont-close)`** - Loads bundled SWANK source from `*swank-source-directory*` (once per session), patches `swank-compile-string`/`swank-compile-file` to EVAL source instead of `compile-file` (no native compiler in the sandbox), patches `call-with-debugging-environment` to guard interpreter-history-stack index 0 (a WASM-only hard trap, not present on native platforms) so SLDB's real backtrace machinery works, then calls `SWANK:CREATE-SERVER` with `:style nil` (`:communication-style nil`, no real threads in this build). Blocks the calling thread.
 
 ## Build & Development Workflow
 
@@ -283,4 +283,4 @@ ECL_WASM=/path/to/custom.wasm uv run python -m unittest discover -s tests
 4. **Reference IDs**: Handles objects that cannot cross the boundary (functions, streams)
 5. **ASDF via file bridge**: Practical source-only module loading without full native environment
 6. **100% coverage enforced**: Catches regressions in core bridge logic
-7. **SWANK via source EVAL, no SLDB**: Bundles unmodified upstream SWANK/SLIME source; compiles via EVAL instead of `compile-file` (no C compiler in the WASM sandbox) and replaces the debugger hook to abort instead of entering the interactive debugger (backtrace stack-walking traps the WASM instance, not a catchable condition)
+7. **SWANK via source EVAL, with working SLDB**: Bundles unmodified upstream SWANK/SLIME source; compiles via EVAL instead of `compile-file` (no C compiler in the WASM sandbox); `eclpy/swank/loader.lisp` defines `swank-loader:*source-directory*` (needed by `is-swank-source-p`) and `runtime.lisp` guards interpreter-history-stack index 0 in `call-with-debugging-environment` (both hard-trap the WASM instance uncaught, unlike on native platforms) so the interactive debugger works normally
