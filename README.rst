@@ -511,7 +511,7 @@ depth. Pass it as ``cls=`` to the standard library's ``json.dumps``/``json.dump`
 
 Plain JSON-native values (``str``, ``int``, ``float``, ``bool``, ``None``,
 ``list``, ``dict``) encode exactly as ``json.JSONEncoder`` normally would --
-only the embedded Lisp values render through ``protocol.to_protocol``. This is
+only the embedded Lisp values render through ``protocol.to_ecl_protocol``. This is
 unrelated to the WASM wire protocol: it does not wrap the whole document in a
 protocol envelope, and it is never used internally by ``Lisp.eval`` or
 ``EclSession``.
@@ -577,7 +577,7 @@ functions.
 .. code-block:: text
 
    Python value
-     -> protocol.to_protocol / json.dumps
+     -> protocol.to_ecl_protocol / json.dumps
      -> JSON text
      -> C string shuttle
      -> ecl-python:json-decode

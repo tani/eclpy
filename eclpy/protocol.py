@@ -147,7 +147,7 @@ class EclJSONEncoder(json.JSONEncoder):
     :class:`~eclpy.objects.Symbol`, :class:`~eclpy.objects.Cons`,
     :class:`~eclpy.objects.Reference`, or :class:`fractions.Fraction` -- mixed
     in with plain Python data, at any depth. Each such value renders as its
-    :func:`to_protocol` form; everything else encodes exactly as
+    :func:`to_ecl_protocol` form; everything else encodes exactly as
     :class:`json.JSONEncoder` normally would.
 
     This is unrelated to :func:`dump_value`, which always wraps the *whole*
@@ -158,16 +158,16 @@ class EclJSONEncoder(json.JSONEncoder):
     def default(self, o: Any) -> Any:
         """Render an eclpy Lisp value as its protocol form."""
         if isinstance(o, Symbol | Cons | Reference | Fraction):
-            return to_protocol(o)
+            return to_ecl_protocol(o)
         return super().default(o)
 
 
 def dump_value(value: Any) -> str:
     """Encode a Python value as JSON text for the Lisp side."""
-    return json.dumps(to_protocol(value), ensure_ascii=False)
+    return json.dumps(to_ecl_protocol(value), ensure_ascii=False)
 
 
-def to_protocol(value: Any) -> dict[str, _JSON_VALUE]:
+def to_ecl_protocol(value: Any) -> dict[str, _JSON_VALUE]:
     """Convert a Python value into the object-shaped protocol structure."""
     match value:
         case None:
@@ -191,17 +191,17 @@ def to_protocol(value: Any) -> dict[str, _JSON_VALUE]:
         case Cons() as cons:
             return {
                 "type": "dotted-list",
-                "items": [to_protocol(cons.car)],
-                "tail": to_protocol(cons.cdr),
+                "items": [to_ecl_protocol(cons.car)],
+                "tail": to_ecl_protocol(cons.cdr),
             }
         case (List() | tuple() | list()) as items:
-            return {"type": "list", "items": [to_protocol(item) for item in items]}
+            return {"type": "list", "items": [to_ecl_protocol(item) for item in items]}
         case dict() as mapping:
             pairs = [
                 {
                     "type": "dotted-list",
-                    "items": [to_protocol(key)],
-                    "tail": to_protocol(item),
+                    "items": [to_ecl_protocol(key)],
+                    "tail": to_ecl_protocol(item),
                 }
                 for key, item in mapping.items()
             ]

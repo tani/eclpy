@@ -92,7 +92,7 @@ The main Python package with layered architecture:
 
 ### Value Crossing the Python-Lisp Boundary
 The bridge uses a **single object-shaped JSON protocol** for all values:
-1. Python value → `protocol.to_protocol()` → JSON → UTF-8 bytes
+1. Python value → `protocol.to_ecl_protocol()` → JSON → UTF-8 bytes
 2. Bytes → WASM memory shuttle
 3. JSON → `ecl-python:json-decode` → `ecl-python:deserialize` → Lisp value
 4. **Reverse**: Lisp value → `ecl-python:serialize` → `ecl-python:json-encode` → JSON → Python
@@ -142,8 +142,9 @@ The bridge uses a **single object-shaped JSON protocol** for all values:
 ### `protocol.py`
 - **`decode_result(node, lisp) → Any`** - Decode top-level success/error envelope
 - **`decode_value(node, lisp) → Any`** - Recursively decode value nodes
-- **`to_protocol(value) → dict`** - Convert Python value to protocol dict
+- **`to_ecl_protocol(value) → dict`** - Convert Python value to protocol dict
 - **`dump_value(value) → str`** - Encode Python value as JSON text
+- **`EclJSONEncoder`** - `json.JSONEncoder` subclass (`cls=EclJSONEncoder`) that renders embedded `Symbol`/`Cons`/`Reference`/`Fraction` values via `to_ecl_protocol()` while leaving plain JSON-native values untouched; unrelated to `dump_value`'s whole-document WASM envelope
 
 ### `encode.py`
 - **`to_syntax_api_expr(value) → SExp`** - Convert Python value to Lisp expression (handles strings as symbols, tuples as lists)

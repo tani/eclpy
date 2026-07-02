@@ -15,7 +15,7 @@ from eclpy.protocol import (
     lookup_kind,
     lookup_optional_string,
     lookup_string,
-    to_protocol,
+    to_ecl_protocol,
 )
 
 
@@ -178,30 +178,30 @@ class DecodeTests(unittest.TestCase):
         with self.assertRaisesRegex(EclError, "expected string or null field 'package'"):
             decode_lookup(lookup("callable", callable_type="function", name="FOO", package=1))
 
-    def test_encode_python_values_to_protocol(self) -> None:
-        self.assertEqual(to_protocol(None), {"type": "nil"})
-        self.assertEqual(to_protocol(False), {"type": "nil"})
-        self.assertEqual(to_protocol(True), {"type": "true"})
-        self.assertEqual(to_protocol(12), {"type": "int", "value": "12"})
+    def test_encode_python_values_to_ecl_protocol(self) -> None:
+        self.assertEqual(to_ecl_protocol(None), {"type": "nil"})
+        self.assertEqual(to_ecl_protocol(False), {"type": "nil"})
+        self.assertEqual(to_ecl_protocol(True), {"type": "true"})
+        self.assertEqual(to_ecl_protocol(12), {"type": "int", "value": "12"})
         self.assertEqual(
-            to_protocol(Fraction(5, 3)),
+            to_ecl_protocol(Fraction(5, 3)),
             {"type": "ratio", "numerator": "5", "denominator": "3"},
         )
-        self.assertEqual(to_protocol(1.25), {"type": "float", "value": "1.25"})
-        self.assertEqual(to_protocol("abc"), {"type": "string", "value": "abc"})
+        self.assertEqual(to_ecl_protocol(1.25), {"type": "float", "value": "1.25"})
+        self.assertEqual(to_ecl_protocol("abc"), {"type": "string", "value": "abc"})
         self.assertEqual(
-            to_protocol(Symbol("FOO", "CL")),
+            to_ecl_protocol(Symbol("FOO", "CL")),
             {"type": "symbol", "name": "FOO", "package": "CL"},
         )
         self.assertEqual(
-            to_protocol(List(1, "x")),
+            to_ecl_protocol(List(1, "x")),
             {
                 "type": "list",
                 "items": [{"type": "int", "value": "1"}, {"type": "string", "value": "x"}],
             },
         )
         self.assertEqual(
-            to_protocol(Cons(1, 2)),
+            to_ecl_protocol(Cons(1, 2)),
             {
                 "type": "dotted-list",
                 "items": [{"type": "int", "value": "1"}],
@@ -209,7 +209,7 @@ class DecodeTests(unittest.TestCase):
             },
         )
         self.assertEqual(
-            to_protocol({"a": 1}),
+            to_ecl_protocol({"a": 1}),
             {
                 "type": "list",
                 "items": [
@@ -229,16 +229,16 @@ class DecodeTests(unittest.TestCase):
             },
         )
         self.assertEqual(
-            to_protocol(Reference(None, 7, "FUNCTION")),
+            to_ecl_protocol(Reference(None, 7, "FUNCTION")),
             {"type": "ref", "id": 7, "kind": "FUNCTION"},
         )
 
         with self.assertRaisesRegex(EclError, "released Lisp reference"):
-            to_protocol(Reference(None, 7, "FUNCTION", released=True))
+            to_ecl_protocol(Reference(None, 7, "FUNCTION", released=True))
         with self.assertRaisesRegex(TypeError, "non-finite float"):
-            to_protocol(inf)
+            to_ecl_protocol(inf)
         with self.assertRaisesRegex(TypeError, "cannot convert object"):
-            to_protocol(object())
+            to_ecl_protocol(object())
 
 
 class EclJSONEncoderTests(unittest.TestCase):
