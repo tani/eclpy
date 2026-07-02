@@ -551,9 +551,6 @@ port number once the server socket is listening."
 (defconstant +json-null+ :json-null)
 (defconstant +json-false+ :json-false)
 
-(defun json-field (key value)
-  (cons key value))
-
 (defun json-object (&rest fields)
   (cons :object fields))
 
@@ -567,7 +564,7 @@ port number once the server socket is listening."
   (and (consp value) (eq (car value) :array)))
 
 (defun protocol-field (key value)
-  (json-field key value))
+  (cons key value))
 
 (defun protocol-envelope (&rest fields)
   (apply #'json-object
@@ -586,6 +583,16 @@ port number once the server socket is listening."
        (protocol-field "condition_type" (condition-type-name condition))
        (protocol-field "message" (condition-message condition))))))
 
+(defun symbol-package-name-or-null (symbol)
+  (let ((package (symbol-package symbol)))
+    (if package (package-name package) +json-null+)))
+
+(defun ref-node (value kind)
+  (json-object
+   (protocol-field "type" "ref")
+   (protocol-field "id" (store-object value))
+   (protocol-field "kind" kind)))
+
 (defun serialize-cons (value seen)
   (let ((items '())
         (tail value))
@@ -601,10 +608,7 @@ port number once the server socket is listening."
                   (protocol-field "items" (json-array (nreverse items)))
                   (protocol-field "tail" (serialize tail seen)))))
         ((gethash tail seen)
-         (return (json-object
-                  (protocol-field "type" "ref")
-                  (protocol-field "id" (store-object value))
-                  (protocol-field "kind" "CONS"))))
+         (return (ref-node value "CONS")))
         (t
          (setf (gethash tail seen) t)
          (push (serialize (car tail) seen) items)
@@ -639,9 +643,7 @@ port number once the server socket is listening."
      (json-object
       (protocol-field "type" "symbol")
       (protocol-field "name" (symbol-name value))
-      (protocol-field "package"
-                      (let ((package (symbol-package value)))
-                        (if package (package-name package) +json-null+)))))
+      (protocol-field "package" (symbol-package-name-or-null value))))
     ((consp value) (serialize-cons value seen))
     ((vectorp value)
      (json-object
@@ -654,16 +656,8 @@ port number once the server socket is listening."
      (json-object
       (protocol-field "type" "package")
       (protocol-field "name" (package-name value))))
-    ((functionp value)
-     (json-object
-      (protocol-field "type" "ref")
-      (protocol-field "id" (store-object value))
-      (protocol-field "kind" "FUNCTION")))
-    (t
-     (json-object
-      (protocol-field "type" "ref")
-      (protocol-field "id" (store-object value))
-      (protocol-field "kind" (prin1-to-string (type-of value)))))))
+    ((functionp value) (ref-node value "FUNCTION"))
+    (t (ref-node value (prin1-to-string (type-of value))))))
 
 (defun json-escape-string (value)
   (with-output-to-string (out)
@@ -713,51 +707,35 @@ port number once the server socket is listening."
   (with-output-to-string (out)
     (json-encode-value value out)))
 
-(defun lookup-envelope (&rest fields)
-  (apply #'protocol-envelope fields))
-
 (defun lookup-symbol (package-name symbol-name)
   (let ((package (find-package package-name)))
     (unless package
       (return-from lookup-symbol
-        (lookup-envelope (protocol-field "kind" "missing"))))
+        (protocol-envelope (protocol-field "kind" "missing"))))
     (multiple-value-bind (symbol status) (find-symbol symbol-name package)
       (declare (ignore status))
       (unless symbol
         (return-from lookup-symbol
-          (lookup-envelope (protocol-field "kind" "missing"))))
-      (let ((symbol-package (symbol-package symbol)))
+          (protocol-envelope (protocol-field "kind" "missing"))))
+      (let ((callable-type (cond
+                              ((special-operator-p symbol) "special")
+                              ((macro-function symbol) "macro")
+                              ((fboundp symbol) "function"))))
         (cond
-          ((special-operator-p symbol)
-           (lookup-envelope
+          (callable-type
+           (protocol-envelope
             (protocol-field "kind" "callable")
-            (protocol-field "callable_type" "special")
+            (protocol-field "callable_type" callable-type)
             (protocol-field "name" (symbol-name symbol))
-            (protocol-field "package"
-                            (if symbol-package (package-name symbol-package) +json-null+))))
-          ((macro-function symbol)
-           (lookup-envelope
-            (protocol-field "kind" "callable")
-            (protocol-field "callable_type" "macro")
-            (protocol-field "name" (symbol-name symbol))
-            (protocol-field "package"
-                            (if symbol-package (package-name symbol-package) +json-null+))))
-          ((fboundp symbol)
-           (lookup-envelope
-            (protocol-field "kind" "callable")
-            (protocol-field "callable_type" "function")
-            (protocol-field "name" (symbol-name symbol))
-            (protocol-field "package"
-                            (if symbol-package (package-name symbol-package) +json-null+))))
+            (protocol-field "package" (symbol-package-name-or-null symbol))))
           ((boundp symbol)
-           (lookup-envelope
+           (protocol-envelope
             (protocol-field "kind" "value")
             (protocol-field "value" (serialize (symbol-value symbol)))))
           (t
-           (lookup-envelope
+           (protocol-envelope
             (protocol-field "kind" "symbol")
             (protocol-field "name" (symbol-name symbol))
-            (protocol-field "package"
-                            (if symbol-package (package-name symbol-package) +json-null+)))))))))
+            (protocol-field "package" (symbol-package-name-or-null symbol)))))))))
 
 (in-package #:cl-user)
