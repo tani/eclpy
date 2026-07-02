@@ -18,6 +18,7 @@ from eclpy.proxy import find_package
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_WASM = ROOT / "eclpy" / "ecl_eval.wasm"
 BUILD_WASM = ROOT / "build" / "eclpy" / "ecl_eval.wasm"
+PYTHON_SOURCE = ROOT / "eclpy" / "python.lisp"
 UNSUPPORTED_PRLIMIT64_WARNING = "unsupported syscall: __syscall_prlimit64"
 
 
@@ -33,6 +34,12 @@ def require_asdf_source() -> Path:
     if not ASDF_SOURCE.is_file():
         raise unittest.SkipTest("ASDF source is not bundled")
     return ASDF_SOURCE
+
+
+def require_python_source() -> Path:
+    if not PYTHON_SOURCE.is_file():
+        raise unittest.SkipTest("PY DSL source is not bundled")
+    return PYTHON_SOURCE
 
 
 class EclSessionTests(unittest.TestCase):
@@ -261,6 +268,110 @@ class LispApiTests(unittest.TestCase):
                 asdf.load_system(L.string("demo"))
                 demo = find_package(lisp, "DEMO")
                 self.assertEqual(demo.add(20, 22), 42)
+
+    def test_python_lisp_file_loads(self) -> None:
+        source = require_python_source()
+        with Lisp(require_wasm()) as lisp:
+            self.assertEqual(lisp.eval(SExp.raw("(and (find-package :py) t)")), List())
+            self.assertIs(
+                lisp.eval(SExp.raw(f"(load #p{SExp.string(str(source))})")),
+                True,
+            )
+            self.assertIs(lisp.eval(SExp.raw("(and (find-package :py) t)")), True)
+            self.assertIs(lisp.eval(SExp.raw("(and (find-package :py.runtime) t)")), True)
+            self.assertIs(lisp.eval(SExp.raw("(and (find-package :py.internal) t)")), True)
+            self.assertEqual(lisp.eval(SExp.raw("(find-package :py.numpy)")), List())
+            # Loading a second time in the same session must still succeed.
+            self.assertIs(
+                lisp.eval(SExp.raw(f"(load #p{SExp.string(str(source))})")),
+                True,
+            )
+
+    def test_python_lisp_exports_expected_symbols(self) -> None:
+        source = require_python_source()
+        py_condition_classes = {
+            "PYTHON-ERROR",
+            "PYTHON-IMPORT-ERROR",
+            "PYTHON-ATTRIBUTE-ERROR",
+            "PYTHON-TYPE-ERROR",
+            "PYTHON-VALUE-ERROR",
+            "PYTHON-RUNTIME-ERROR",
+        }
+        py_condition_accessors = {
+            "CONDITION-TYPE",
+            "CONDITION-MESSAGE",
+            "CONDITION-TRACEBACK",
+            "CONDITION-OBJECT",
+        }
+        py_exports = {
+            "WITH-PY", "IMPORT", "RESOLVE", "ATTR", "CALL", "KEYWORD", "STARRED",
+            "KW-STARRED", "SUBSCRIPT", "SET-SUBSCRIPT", "SET-ATTR", "LIST", "TUPLE",
+            "DICT", "SET", "SLICE", "NONE", "TRUE", "FALSE",
+            "ADD", "SUB", "MULT", "MAT-MULT", "DIV", "FLOOR-DIV", "MOD", "POW",
+            "U-ADD", "U-SUB", "INVERT", "BIT-AND", "BIT-OR", "BIT-XOR", "L-SHIFT",
+            "R-SHIFT", "EQ", "NOT-EQ", "LT", "LT-E", "GT", "GT-E", "IS", "IS-NOT",
+            "IN", "NOT-IN", "NE", "LE", "GE", "AND", "OR", "NOT", "TO-PY", "TO-CL",
+            "REPR", "STR", "WITH-CONTEXT", "TRY", "CALLBACK", "EVAL", "EXEC",
+            "METHOD", "CALL-ATTR", "DOTTED", "GET", "ALL", "FROM", "TO", "BETWEEN",
+            "BY", "PLIST-DICT", "COLUMNS", "CHAIN", "CHAIN-CALL", "CHAIN-ATTR",
+            "CHAIN-SUBSCRIPT", "AS-BOOL", "AS-INT", "AS-FLOAT", "AS-STRING",
+            "AS-LIST", "AS-VECTOR", "AS-DICT", "TRUTH", "FALSEHOOD", "TRUTH-CL",
+            "NONE-P", "SOME-P", "WITH-FROM",
+        }
+        runtime_exports = {
+            "PY-OBJECT", "PY-OBJECT-P", "PY-OBJECT-EXPR", "IMPORT-MODULE",
+            "RESOLVE-NAME", "GET-ATTR", "SET-ATTR", "CALL", "GET-ITEM", "SET-ITEM",
+            "MAKE-LIST", "MAKE-TUPLE", "MAKE-DICT", "MAKE-SET", "MAKE-SLICE",
+            "NUMBER-OP", "COMPARE-OP", "TRUTH", "TO-PY", "TO-CL", "ENTER-CONTEXT",
+            "EXIT-CONTEXT", "MAKE-CALLBACK", "EVAL", "EXEC",
+        }
+        with Lisp(require_wasm()) as lisp:
+            lisp.eval(SExp.raw(f"(load #p{SExp.string(str(source))})"))
+
+            def external_p(package: str, name: str) -> bool:
+                form = f'(eq (nth-value 1 (find-symbol "{name}" "{package}")) :external)'
+                return lisp.eval(SExp.raw(form)) is True
+
+            for name in py_condition_classes:
+                self.assertTrue(external_p("PY", name), f"PY:{name} is not external")
+                self.assertIs(
+                    lisp.eval(SExp.raw(f"(and (find-class 'py:{name.lower()} nil) t)")), True
+                )
+            for name in py_condition_accessors:
+                self.assertTrue(external_p("PY", name), f"PY:{name} is not external")
+                self.assertIs(lisp.eval(SExp.raw(f"(and (fboundp 'py:{name.lower()}) t)")), True)
+            for name in py_exports:
+                self.assertTrue(external_p("PY", name), f"PY:{name} is not external")
+                self.assertIs(lisp.eval(SExp.raw(f"(and (fboundp 'py:{name.lower()}) t)")), True)
+            for name in runtime_exports:
+                self.assertTrue(
+                    external_p("PY.RUNTIME", name), f"PY.RUNTIME:{name} is not external"
+                )
+
+    def test_python_lisp_eval_backed_runtime_smoke(self) -> None:
+        source = require_python_source()
+        with Lisp(require_wasm()) as lisp:
+            lisp.eval(SExp.raw(f"(load #p{SExp.string(str(source))})"))
+            self.assertEqual(lisp.eval(SExp.raw("(py:as-int (py:add 1 2))")), 3)
+            dumped = lisp.eval(
+                SExp.raw(
+                    '(py:with-py ((json "json")) '
+                    '(py:as-string (py:call-attr json "dumps" (py:dict "x" 1))))'
+                )
+            )
+            self.assertIn('"x"', dumped)
+            self.assertIn("1", dumped)
+            self.assertIs(lisp.eval(SExp.raw("(py:as-bool (py:truth (py:list 1)))")), True)
+            self.assertIs(lisp.eval(SExp.raw("(py:as-bool (py:none-p (py:none)))")), True)
+
+    def test_python_lisp_callback_reports_unsupported_backend(self) -> None:
+        source = require_python_source()
+        with Lisp(require_wasm()) as lisp:
+            lisp.eval(SExp.raw(f"(load #p{SExp.string(str(source))})"))
+            with self.assertRaisesRegex(
+                EclError, "Callbacks require a Python-to-Lisp callback backend"
+            ):
+                lisp.eval(SExp.raw("(py:callback (x) x)"))
 
     def test_truename_of_missing_host_file_errors(self) -> None:
         with tempfile.TemporaryDirectory() as directory, Lisp(require_wasm()) as lisp:

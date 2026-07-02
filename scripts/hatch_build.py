@@ -11,7 +11,7 @@ class WasmArtifactBuildHook(BuildHookInterface):
         if self.target_name != "wheel":
             return
 
-        required = ("ecl_eval.wasm", "asdf.lisp")
+        required = ("ecl_eval.wasm", "asdf.lisp", "python.lisp")
         for name in required:
             artifact = Path(self.root) / "eclpy" / name
             if not artifact.is_file():

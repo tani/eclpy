@@ -33,6 +33,7 @@ artifacts = [
     "eclpy/ecl_eval.wasm",
     "eclpy/asdf.lisp",
     "eclpy/runtime.lisp",
+    "eclpy/python.lisp",
     "eclpy/swank/*.lisp",
 ]
 
@@ -69,6 +70,7 @@ exclude = [
 "eclpy/ecl_eval.wasm" = "eclpy/ecl_eval.wasm"
 "eclpy/asdf.lisp" = "eclpy/asdf.lisp"
 "eclpy/runtime.lisp" = "eclpy/runtime.lisp"
+"eclpy/python.lisp" = "eclpy/python.lisp"
 "eclpy/swank" = "eclpy/swank"
 
 [tool.hatch.build.hooks.custom]
