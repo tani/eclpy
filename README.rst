@@ -56,8 +56,8 @@ For everyday use, import ``eclpy.syntax`` as a small expression builder:
 ``L.expr`` takes one Python value. Use ``L.expr(("+", 1, 1))``, not
 ``L.expr("+", 1, 1)``.
 
-CLI (REPL)
----------
+Command-Line Interface
+----------------------
 
 ``eclpy`` ships a command-line REPL that starts in the ``eclpy-user`` package,
 which already uses ``ecl-python`` and ``cl``, so ``py-eval`` and ``py-exec``
@@ -426,7 +426,7 @@ evaluating a SWANK request reach ECL's native condition system instead of
 being caught and reported back as an ``EclError``.
 
 Limitations in the WASM Sandbox
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 * **No native compilation.** The sandbox has no C compiler and cannot
   ``dlopen`` shared objects, so ``compile-string-for-emacs`` and

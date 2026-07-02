@@ -97,7 +97,7 @@ def _eval_and_print(lisp: Lisp, source: str) -> bool:
             print(result)
         return True
     except EclError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        print(f"eclpy: error: {exc}", file=sys.stderr)
         return False
 
 
@@ -138,13 +138,29 @@ def _run(lisp: Lisp, source: str) -> int:
     return 0 if _eval_and_print(lisp, source) else 1
 
 
+def _run_file(lisp: Lisp, path: Path) -> int:
+    try:
+        source = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"eclpy: error: {exc}", file=sys.stderr)
+        return 1
+    return _run(lisp, source)
+
+
+def _serve_swank(lisp: Lisp, port: int) -> None:
+    print(f"eclpy: starting SWANK on port {port} (Ctrl-C to stop)", file=sys.stderr)
+    try:
+        lisp.start_swank(port)
+    except KeyboardInterrupt:
+        sys.exit(0)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="eclpy",
         description="Common Lisp REPL/runner with Python interop (ECL via WebAssembly)",
     )
     parser.add_argument("-e", "--eval", metavar="EXPR", help="evaluate EXPR and exit")
-    parser.add_argument("file", nargs="?", metavar="FILE", help="Lisp source file to run")
     parser.add_argument(
         "--swank",
         nargs="?",
@@ -153,31 +169,20 @@ def main() -> None:
         default=None,
         metavar="PORT",
         help=(
-            "start a SWANK/SLIME server on PORT (default 4005) instead of "
-            "evaluating -e/FILE or starting the REPL; blocks until interrupted"
+            "start a SWANK/SLIME server on PORT (default 4005) and block until "
+            "interrupted, instead of evaluating -e/FILE or starting the REPL"
         ),
     )
+    parser.add_argument("file", nargs="?", metavar="FILE", help="run FILE and exit")
     args = parser.parse_args()
 
     with Lisp() as lisp:
         if args.swank is not None:
-            print(f"eclpy: starting SWANK on port {args.swank} (Ctrl-C to stop)", file=sys.stderr)
-            try:
-                lisp.start_swank(args.swank)
-            except KeyboardInterrupt:
-                sys.exit(0)
-            return
-
-        if args.eval is not None:
+            _serve_swank(lisp, args.swank)
+        elif args.eval is not None:
             sys.exit(_run(lisp, args.eval))
         elif args.file:
-            path = Path(args.file)
-            try:
-                source = path.read_text(encoding="utf-8")
-            except OSError as exc:
-                print(f"eclpy: {exc}", file=sys.stderr)
-                sys.exit(1)
-            sys.exit(_run(lisp, source))
+            sys.exit(_run_file(lisp, Path(args.file)))
         else:
             _repl(lisp)
 
