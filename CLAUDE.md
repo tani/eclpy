@@ -10,6 +10,14 @@ This file provides guidance to coding agents when working with code in this repo
 **Language**: Python (3.14+), C, Lisp
 **Key Technology**: Wasmtime + Emscripten + ECL compiled to WASM
 
+## Project Principles
+
+This project follows **KISS (Keep It Simple, Stupid)**:
+- Prefer the simple, boring solution that is robust and sufficient. Do not optimize unless a concrete need demands it.
+- A change that makes the code shorter/more elegant in the abstract but adds new indirection, new host bridges, or new loading paths is a **complication**, not a simplification — reject it.
+- When evaluating a refactor, weigh it against what it actually removes (lines, files, concepts) vs. what it adds (glue code, new code paths, lost laziness/behavior). If the honest accounting is a wash or a net increase in moving parts, keep the current design.
+- Concrete precedent: loading `asdf.lisp`/`eclpy/swank/*.lisp` from disk on demand via the host file bridge (`cl:load` + `native-load`) was proposed to be replaced with pre-read in-memory Lisp source strings, mirroring `runtime.lisp`'s `HELPER_SOURCE` pattern. Rejected: `runtime.lisp` is loaded unconditionally exactly once per session, so eager in-memory loading costs nothing extra; ASDF and SWANK are loaded lazily (only when `require`d / `start_swank`ed), so making them eager either regresses eval-only startup cost, or requires reintroducing lazy dispatch by embedding escaped Lisp source as string constants — more glue code than the two `setf`+`pathname` calls it would replace, and the host file bridge (`cl:open`/`probe-file`/`user-homedir-pathname`) still can't be removed since ASDF's real project loading and SWANK's `~/.slime-secret`/`swank-compile-file` need genuine host file access regardless.
+
 ## Repository Structure
 
 ### Core Package: `eclpy/`
