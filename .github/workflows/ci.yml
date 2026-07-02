@@ -34,7 +34,7 @@ jobs:
           actions-cache-folder: emsdk-cache
 
       - name: Install dependencies
-        run: uv sync --locked --dev --no-install-project
+        run: uv sync --locked --dev --extra repl --no-install-project
 
       - name: Verify Emscripten
         run: emcc -v
