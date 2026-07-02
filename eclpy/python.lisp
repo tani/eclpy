@@ -1,8 +1,8 @@
 ;;;; python.lisp -- the PY DSL for calling into Python from Common Lisp.
 ;;;;
-;;;; This file is explicit-load only (it is never loaded by runtime.lisp), so
-;;;; ordinary `Lisp` sessions pay no extra startup cost for callers who never
-;;;; need it. Load it with `(load #p"/path/to/eclpy/python.lisp")`.
+;;;; This file is loaded automatically by high-level `Lisp` sessions, immediately
+;;;; after runtime.lisp. It is still kept as ordinary Lisp source so it can be
+;;;; reviewed and documented directly.
 ;;;;
 ;;;; PY.RUNTIME is an eval-backed handle runtime: every Python object is a
 ;;;; string naming a persistent global (or an immutable literal such as

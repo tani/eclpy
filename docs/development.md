@@ -76,6 +76,7 @@ eclpy/hostenv.py
 eclpy/wasmmem.py
 eclpy/objects.py
 eclpy/runtime_lisp.py
+eclpy/python_lisp.py
 eclpy/runtime.lisp
 eclpy/python.lisp
 eclpy/sexp.py

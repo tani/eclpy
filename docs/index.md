@@ -11,6 +11,7 @@ boundaries together.
 
 quickstart
 api-guide
+python-in-lisp
 asdf
 swank
 architecture

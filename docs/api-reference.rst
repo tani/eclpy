@@ -80,6 +80,17 @@ Low-level session and host boundary
    :members:
    :undoc-members:
 
+Lisp source loaders
+-------------------
+
+.. automodule:: eclpy.runtime_lisp
+   :members:
+   :undoc-members:
+
+.. automodule:: eclpy.python_lisp
+   :members:
+   :undoc-members:
+
 .. automodule:: eclpy.errors
    :members:
    :undoc-members:

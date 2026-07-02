@@ -272,7 +272,7 @@ class LispApiTests(unittest.TestCase):
     def test_python_lisp_file_loads(self) -> None:
         source = require_python_source()
         with Lisp(require_wasm()) as lisp:
-            self.assertEqual(lisp.eval(SExp.raw("(and (find-package :py) t)")), List())
+            self.assertIs(lisp.eval(SExp.raw("(and (find-package :py) t)")), True)
             self.assertIs(
                 lisp.eval(SExp.raw(f"(load #p{SExp.string(str(source))})")),
                 True,
@@ -288,7 +288,8 @@ class LispApiTests(unittest.TestCase):
             )
 
     def test_python_lisp_exports_expected_symbols(self) -> None:
-        source = require_python_source()
+        # PY is loaded automatically for high-level sessions; callers should not
+        # need to load eclpy/python.lisp before resolving exported symbols.
         py_condition_classes = {
             "PYTHON-ERROR",
             "PYTHON-IMPORT-ERROR",
@@ -326,7 +327,8 @@ class LispApiTests(unittest.TestCase):
             "EXIT-CONTEXT", "MAKE-CALLBACK", "EVAL", "EXEC",
         }
         with Lisp(require_wasm()) as lisp:
-            lisp.eval(SExp.raw(f"(load #p{SExp.string(str(source))})"))
+            self.assertIs(lisp.eval(SExp.raw('(and (find-package "PY") t)')), True)
+            self.assertIs(lisp.eval(SExp.raw('(and (find-package "PY.RUNTIME") t)')), True)
 
             def external_p(package: str, name: str) -> bool:
                 form = f'(eq (nth-value 1 (find-symbol "{name}" "{package}")) :external)'
@@ -349,9 +351,8 @@ class LispApiTests(unittest.TestCase):
                 )
 
     def test_python_lisp_eval_backed_runtime_smoke(self) -> None:
-        source = require_python_source()
         with Lisp(require_wasm()) as lisp:
-            lisp.eval(SExp.raw(f"(load #p{SExp.string(str(source))})"))
+            self.assertIs(lisp.eval(SExp.raw('(and (find-package "PY") t)')), True)
             self.assertEqual(lisp.eval(SExp.raw("(py:as-int (py:add 1 2))")), 3)
             dumped = lisp.eval(
                 SExp.raw(
@@ -365,9 +366,8 @@ class LispApiTests(unittest.TestCase):
             self.assertIs(lisp.eval(SExp.raw("(py:as-bool (py:none-p (py:none)))")), True)
 
     def test_python_lisp_callback_reports_unsupported_backend(self) -> None:
-        source = require_python_source()
         with Lisp(require_wasm()) as lisp:
-            lisp.eval(SExp.raw(f"(load #p{SExp.string(str(source))})"))
+            self.assertIs(lisp.eval(SExp.raw('(and (find-package "PY") t)')), True)
             with self.assertRaisesRegex(
                 EclError, "Callbacks require a Python-to-Lisp callback backend"
             ):

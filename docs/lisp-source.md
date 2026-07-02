@@ -18,9 +18,9 @@ shim.
 
 ## `eclpy/python.lisp`
 
-`python.lisp` is loaded explicitly by users that want the `PY` DSL. It defines
-an eval-backed Python object protocol on top of `ecl-python:py-eval` and
-`ecl-python:py-exec`.
+`python.lisp` is loaded automatically by high-level `Lisp` sessions after
+`runtime.lisp`. It defines an eval-backed Python object protocol on top of
+`ecl-python:py-eval` and `ecl-python:py-exec`.
 
 ```{literalinclude} ../eclpy/python.lisp
 :language: common-lisp

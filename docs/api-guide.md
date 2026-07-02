@@ -126,18 +126,19 @@ evaluate trusted code.
 
 ## The `PY` DSL
 
-`eclpy/python.lisp` defines an explicit-load `PY` package with a Pythonic
-object protocol (import, attributes, calls, subscripts, operators, context
-managers, exception mapping) built on top of `py-eval`/`py-exec`. It is not
-loaded automatically, so ordinary sessions pay nothing for it:
+`eclpy/python.lisp` defines the automatically loaded `PY` package with a
+Pythonic object protocol (import, attributes, calls, subscripts, operators,
+context managers, exception mapping) built on top of `py-eval`/`py-exec`:
 
 ```python
 import eclpy
 
 with eclpy.Lisp() as lisp:
-    lisp.eval(eclpy.SExp.raw('(load #p"/path/to/eclpy/python.lisp")'))
     assert lisp.eval(eclpy.SExp.raw("(py:as-int (py:add 1 2))")) == 3
 ```
+
+See [Python in Lisp](python-in-lisp.md) for a guide to imports, conversions,
+operators, context managers, and error mapping.
 
 True Python-to-Lisp callbacks (`PY:CALLBACK`) are not implemented by this
 eval-backed runtime; calling them raises `PY:PYTHON-RUNTIME-ERROR`.

@@ -1,8 +1,8 @@
 """High-level facade for evaluating Common Lisp through ECL.
 
 The :class:`Lisp` object owns the user-facing session setup: it boots or wraps
-an :class:`~eclpy.session.EclSession`, loads the Lisp helper package, points
-that helper at bundled ASDF/SWANK source files, and tracks Python-owned Lisp
+an :class:`~eclpy.session.EclSession`, loads the Lisp helper package and PY DSL,
+points that helper at bundled ASDF/SWANK source files, and tracks Python-owned
 references until they are released.
 """
 
@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Self
 from .errors import EclError
 from .objects import Reference
 from .protocol import decode_result
+from .python_lisp import PY_SOURCE
 from .runtime_lisp import HELPER_SOURCE
 from .session import EclSession
 from .sexp import SExp
@@ -30,10 +31,10 @@ SWANK_SOURCE_DIRECTORY = Path(__file__).with_name("swank")
 class Lisp:
     """A cl4py-like interface to one ECL WebAssembly session.
 
-    Constructing a ``Lisp`` instance loads ``runtime.lisp`` into the underlying
-    ECL image. The high-level :meth:`eval` method accepts only explicit
-    :class:`~eclpy.sexp.SExp` nodes so the boundary between Python data and Lisp
-    source stays visible.
+    Constructing a ``Lisp`` instance loads ``runtime.lisp`` and ``python.lisp``
+    into the underlying ECL image. The high-level :meth:`eval` method accepts
+    only explicit :class:`~eclpy.sexp.SExp` nodes so the boundary between Python
+    data and Lisp source stays visible.
     """
 
     def __init__(
@@ -67,6 +68,8 @@ class Lisp:
             SExp.raw(f"#p{SExp.string(str(SWANK_SOURCE_DIRECTORY) + '/')}"),
         )
         self.session.eval(str(swank_form))
+        self.session.eval(PY_SOURCE)
+        self.session.eval("(cl:in-package #:cl-user)")
 
     def eval(self, form: Any) -> Any:
         """Evaluate an explicit S-expression and decode its Lisp result.

@@ -49,7 +49,7 @@ flowchart TB
     refs["*objects* table<br/>opaque Reference ids"]
     hostenv["hostenv.py imports<br/>files, sockets, Python eval/exec"]
     lazy["lazy source loads<br/>ASDF and SWANK only when requested"]
-    pydsl["python.lisp<br/>explicit PY DSL load"]
+    pydsl["python.lisp<br/>auto-loaded PY DSL"]
 
     session --> cbridge
     cbridge --> runtime

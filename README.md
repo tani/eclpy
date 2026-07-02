@@ -8,9 +8,9 @@ calling functions, accessing packages, and converting common Lisp values to
 Python values. Normal users can start with `eclpy.syntax`; heavier users can
 drop down to explicit `SExp` trees or the raw `EclSession` bridge.
 
-The bridge is bidirectional: Lisp code can also evaluate Python through
-`ecl-python:py-eval` / `py-exec`, and an explicit-load `PY` DSL
-(`eclpy/python.lisp`) gives Lisp code a Pythonic object protocol (import,
+The bridge is bidirectional: Lisp code can evaluate Python through
+`ecl-python:py-eval` / `py-exec`, and the automatically loaded `PY` DSL
+(`eclpy/python.lisp`) gives Lisp code a Pythonic object protocol (imports,
 attributes, calls, operators, context managers) on top of that bridge.
 
 ## Install
@@ -44,6 +44,8 @@ command-line REPL, Pythonic package proxies, and the full public API.
 - [docs/api-guide.md](docs/api-guide.md) -- strict `SExp` evaluation,
   references, conses, evaluating Python from Lisp, the `PY` DSL, low-level
   session API, errors, security model.
+- [docs/python-in-lisp.md](docs/python-in-lisp.md) -- automatically loaded
+  `PY` DSL for calling Python from Lisp.
 - [docs/asdf.md](docs/asdf.md) -- loading ASDF and local source systems.
 - [docs/swank.md](docs/swank.md) -- SWANK/SLIME server and its WASM sandbox
   limitations.

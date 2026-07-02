@@ -152,9 +152,9 @@ The modules are split by layer:
 | `eclpy/hostenv.py`         | WASM env imports: files, stat, Python eval/exec         |
 | `eclpy/wasmmem.py`         | WASM linear-memory helpers                              |
 | `eclpy/runtime.lisp`       | Lisp-side helper package source                         |
-| `eclpy/python.lisp`        | Common Lisp `PY` DSL for Python object interop (explicit load) |
+| `eclpy/python.lisp`        | automatically loaded Common Lisp `PY` DSL for Python object interop |
 | `eclpy/swank/`             | bundled upstream SWANK server source                    |
 
 See [the API guide](api-guide.md) for `SExp`, references, conses, the `PY`
-DSL, and error handling; [Architecture](architecture.md) for how values
-cross the WASM boundary.
+DSL, and error handling; [Python in Lisp](python-in-lisp.md) for Python interop
+from Lisp; [Architecture](architecture.md) for how values cross the WASM boundary.
