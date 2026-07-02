@@ -139,6 +139,29 @@ def decode_value(node: Any, lisp: Any) -> Any:
             raise EclError(message)
 
 
+class EclJSONEncoder(json.JSONEncoder):
+    """A ``json.JSONEncoder`` that understands eclpy's Lisp value objects.
+
+    Drop-in for :func:`json.dumps`/:func:`json.dump` (``cls=EclJSONEncoder``)
+    for otherwise-ordinary JSON documents that also carry eclpy Lisp values --
+    :class:`~eclpy.objects.Symbol`, :class:`~eclpy.objects.Cons`,
+    :class:`~eclpy.objects.Reference`, or :class:`fractions.Fraction` -- mixed
+    in with plain Python data, at any depth. Each such value renders as its
+    :func:`to_protocol` form; everything else encodes exactly as
+    :class:`json.JSONEncoder` normally would.
+
+    This is unrelated to :func:`dump_value`, which always wraps the *whole*
+    value in the protocol envelope for the WASM boundary; use that instead
+    when talking to the Lisp side.
+    """
+
+    def default(self, o: Any) -> Any:
+        """Render an eclpy Lisp value as its protocol form."""
+        if isinstance(o, Symbol | Cons | Reference | Fraction):
+            return to_protocol(o)
+        return super().default(o)
+
+
 def dump_value(value: Any) -> str:
     """Encode a Python value as JSON text for the Lisp side."""
     return json.dumps(to_protocol(value), ensure_ascii=False)

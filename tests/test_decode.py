@@ -6,7 +6,7 @@ from fractions import Fraction
 from math import inf
 from typing import Any
 
-from eclpy import Cons, EclError, List, Package, Reference, Symbol
+from eclpy import Cons, EclError, EclJSONEncoder, List, Package, Reference, Symbol
 from eclpy.protocol import (
     decode_lookup,
     decode_result,
@@ -239,6 +239,74 @@ class DecodeTests(unittest.TestCase):
             to_protocol(inf)
         with self.assertRaisesRegex(TypeError, "cannot convert object"):
             to_protocol(object())
+
+
+class EclJSONEncoderTests(unittest.TestCase):
+    def test_encode_mixed_document_at_multiple_depths(self) -> None:
+        document = {
+            "name": "example",
+            "count": 3,
+            "active": True,
+            "nothing": None,
+            "pi": 2.5,
+            "ratio": Fraction(1, 3),
+            "symbol": Symbol("FOO", "CL-USER"),
+            "items": [1, "two", Cons(1, 2), 3.5],
+            "nested": {
+                "inner": Symbol("BAR"),
+                "flag": False,
+                "list": [None, Fraction(2, 5)],
+            },
+        }
+        self.assertEqual(
+            json.loads(json.dumps(document, cls=EclJSONEncoder)),
+            {
+                "name": "example",
+                "count": 3,
+                "active": True,
+                "nothing": None,
+                "pi": 2.5,
+                "ratio": {"type": "ratio", "numerator": "1", "denominator": "3"},
+                "symbol": {"type": "symbol", "name": "FOO", "package": "CL-USER"},
+                "items": [
+                    1,
+                    "two",
+                    {
+                        "type": "dotted-list",
+                        "items": [{"type": "int", "value": "1"}],
+                        "tail": {"type": "int", "value": "2"},
+                    },
+                    3.5,
+                ],
+                "nested": {
+                    "inner": {"type": "symbol", "name": "BAR", "package": None},
+                    "flag": False,
+                    "list": [None, {"type": "ratio", "numerator": "2", "denominator": "5"}],
+                },
+            },
+        )
+
+    def test_encode_live_reference(self) -> None:
+        document = {"ref": Reference(None, 7, "FUNCTION"), "note": "ok"}
+        self.assertEqual(
+            json.loads(json.dumps(document, cls=EclJSONEncoder)),
+            {"ref": {"type": "ref", "id": 7, "kind": "FUNCTION"}, "note": "ok"},
+        )
+
+    def test_encode_released_reference_raises(self) -> None:
+        released = Reference(None, 7, "FUNCTION", released=True)
+        with self.assertRaisesRegex(EclError, "released Lisp reference"):
+            json.dumps({"ref": released}, cls=EclJSONEncoder)
+
+    def test_encode_unsupported_type_falls_back_to_type_error(self) -> None:
+        with self.assertRaises(TypeError):
+            json.dumps({"value": object()}, cls=EclJSONEncoder)
+
+    def test_encode_differs_from_dump_value_for_plain_data(self) -> None:
+        encoder_result = json.loads(json.dumps([1, "x"], cls=EclJSONEncoder))
+        dump_value_result = json.loads(dump_value([1, "x"]))
+        self.assertEqual(encoder_result, [1, "x"])
+        self.assertNotEqual(encoder_result, dump_value_result)
 
 
 if __name__ == "__main__":
