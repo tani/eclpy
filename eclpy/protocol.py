@@ -14,13 +14,11 @@ JSON text across the WASM boundary.
 
 from __future__ import annotations
 
-import json
-import math
 from fractions import Fraction
 from typing import Any, Literal, cast
 
 from .errors import EclError
-from .objects import Cons, List, Reference, Symbol
+from .objects import Cons, List, Symbol
 
 PROTOCOL_NAME = "eclpy"
 PROTOCOL_VERSION = 1
@@ -139,83 +137,6 @@ def decode_value(node: Any, lisp: Any) -> Any:
             raise EclError(message)
 
 
-class EclJSONEncoder(json.JSONEncoder):
-    """A ``json.JSONEncoder`` that understands eclpy's Lisp value objects.
-
-    Drop-in for :func:`json.dumps`/:func:`json.dump` (``cls=EclJSONEncoder``)
-    for otherwise-ordinary JSON documents that also carry eclpy Lisp values --
-    :class:`~eclpy.objects.Symbol`, :class:`~eclpy.objects.Cons`,
-    :class:`~eclpy.objects.Reference`, or :class:`fractions.Fraction` -- mixed
-    in with plain Python data, at any depth. Each such value renders as its
-    :func:`to_ecl_protocol` form; everything else encodes exactly as
-    :class:`json.JSONEncoder` normally would.
-
-    This is unrelated to :func:`dump_value`, which always wraps the *whole*
-    value in the protocol envelope for the WASM boundary; use that instead
-    when talking to the Lisp side.
-    """
-
-    def default(self, o: Any) -> Any:
-        """Render an eclpy Lisp value as its protocol form."""
-        if isinstance(o, Symbol | Cons | Reference | Fraction):
-            return to_ecl_protocol(o)
-        return super().default(o)
-
-
-def dump_value(value: Any) -> str:
-    """Encode a Python value as JSON text for the Lisp side."""
-    return json.dumps(to_ecl_protocol(value), ensure_ascii=False)
-
-
-def to_ecl_protocol(value: Any) -> dict[str, _JSON_VALUE]:
-    """Convert a Python value into the object-shaped protocol structure."""
-    match value:
-        case None:
-            return {"type": "nil"}
-        case bool():
-            return {"type": "true"} if value else {"type": "nil"}
-        case int():
-            return {"type": "int", "value": str(value)}
-        case Fraction() as ratio:
-            return {
-                "type": "ratio",
-                "numerator": str(ratio.numerator),
-                "denominator": str(ratio.denominator),
-            }
-        case float() as number:
-            return {"type": "float", "value": _float_text(number)}
-        case str() as text:
-            return {"type": "string", "value": text}
-        case Symbol() as symbol:
-            return {"type": "symbol", "name": symbol.name, "package": symbol.package}
-        case Cons() as cons:
-            return {
-                "type": "dotted-list",
-                "items": [to_ecl_protocol(cons.car)],
-                "tail": to_ecl_protocol(cons.cdr),
-            }
-        case (List() | tuple() | list()) as items:
-            return {"type": "list", "items": [to_ecl_protocol(item) for item in items]}
-        case dict() as mapping:
-            pairs = [
-                {
-                    "type": "dotted-list",
-                    "items": [to_ecl_protocol(key)],
-                    "tail": to_ecl_protocol(item),
-                }
-                for key, item in mapping.items()
-            ]
-            return {"type": "list", "items": pairs}
-        case Reference() as reference:
-            if reference.released:
-                message = "cannot pass a released Lisp reference"
-                raise EclError(message)
-            return {"type": "ref", "id": reference.object_id, "kind": reference.type_name}
-        case _:
-            message = f"cannot convert {type(value).__name__} to the eclpy JSON protocol"
-            raise TypeError(message)
-
-
 def lookup_kind(node: dict[str, Any]) -> _LookupKind:
     """Return the validated lookup kind."""
     kind = _required_string(node, "kind")
@@ -317,8 +238,3 @@ def _required(node: dict[str, Any], key: str) -> Any:
     return node[key]
 
 
-def _float_text(value: float) -> str:
-    if not math.isfinite(value):
-        message = "cannot convert a non-finite float to the eclpy JSON protocol"
-        raise TypeError(message)
-    return repr(value)

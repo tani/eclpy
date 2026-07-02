@@ -186,7 +186,11 @@ class LispApiTests(unittest.TestCase):
             self.assertEqual(lisp.eval(SExp.raw('(ecl-python:py-eval "x * 2")')), 10)
             self.assertEqual(
                 lisp.eval(SExp.raw('(ecl-python:py-eval "[1, \\"x\\"]")')),
-                List(1, "x"),
+                [1, "x"],
+            )
+            self.assertEqual(
+                lisp.eval(SExp.raw('(ecl-python:py-eval "{\\"a\\": 1}")')),
+                List(Cons("a", 1)),
             )
             self.assertEqual(
                 lisp.eval(SExp.raw('(ecl-python:py-eval "(1, 2.5, \\"z\\")")')),
@@ -208,6 +212,11 @@ class LispApiTests(unittest.TestCase):
                     )
                 ),
             )
+
+    def test_lisp_can_eval_python_non_finite_float_errors(self) -> None:
+        with Lisp(require_wasm()) as lisp:
+            with self.assertRaisesRegex(EclError, "non-finite float"):
+                lisp.eval(SExp.raw('(ecl-python:py-eval "float(\\"inf\\")")'))
 
     def test_require_asdf(self) -> None:
         require_asdf_source()
@@ -339,6 +348,14 @@ class LispApiTests(unittest.TestCase):
             self.assertEqual(cl.car((1, 2)), 1)
             self.assertFalse(hasattr(lisp, "function"))
             self.assertFalse(hasattr(lisp, "find_package"))
+
+    def test_lisp_proxy_accepts_dict_argument(self) -> None:
+        with Lisp(require_wasm()) as lisp:
+            cl = find_package(lisp, "CL")
+            self.assertEqual(
+                cl.identity({"a": 1, "b": 2}),
+                List(Cons("a", 1), Cons("b", 2)),
+            )
 
     def test_lisp_package_attribute_api(self) -> None:
         with Lisp(require_wasm()) as lisp:

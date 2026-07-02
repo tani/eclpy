@@ -330,10 +330,10 @@ static cl_object eclpy_call_python(cl_object source, eclpy_python_bridge callbac
         free(data);
         FEerror("Python ~A failed: ~A", 2, ecl_make_simple_base_string(operation, -1), message);
     }
-    /* The helper package owns JSON decoding and protocol deserialization. */
-    cl_object json = ecl_make_simple_base_string(data, data_len);
+    /* The helper package owns Lisp-source reading and evaluation. */
+    cl_object source_text = ecl_make_simple_base_string(data, data_len);
     free(data);
-    return json;
+    return source_text;
 }
 
 static cl_object eclpy_py_eval(cl_object source) {

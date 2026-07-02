@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from fractions import Fraction
 from typing import Any, Protocol, runtime_checkable
 
@@ -80,7 +81,7 @@ def to_data_expr(value: Any) -> SExp:
         case Fraction() as ratio:
             return SExp.ratio(ratio)
         case float() as number:
-            return SExp.float(number)
+            return SExp.float(_finite_float(number))
         case str() as string:
             return SExp.string(string)
         case Symbol() as symbol:
@@ -110,6 +111,14 @@ def to_data_expr(value: Any) -> SExp:
                 to_data_expr(cons.car),
                 to_data_expr(cons.cdr),
             )
+        case dict() as mapping:
+            return SExp.list(
+                SExp.symbol("LIST"),
+                *(
+                    SExp.list(SExp.symbol("CONS"), to_data_expr(key), to_data_expr(item))
+                    for key, item in mapping.items()
+                ),
+            )
         case _:
             message = f"cannot convert {type(value).__name__} to Lisp"
             raise TypeError(message)
@@ -121,3 +130,10 @@ def _is_callable_symbol(value: Any) -> bool:
 
 def _is_package(value: Any) -> bool:
     return isinstance(value, _PackageLike)
+
+
+def _finite_float(value: float) -> float:
+    if not math.isfinite(value):
+        message = "cannot convert a non-finite float to Lisp"
+        raise TypeError(message)
+    return value

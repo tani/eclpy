@@ -1,21 +1,17 @@
 from __future__ import annotations
 
-import json
 import unittest
 from fractions import Fraction
-from math import inf
 from typing import Any
 
-from eclpy import Cons, EclError, EclJSONEncoder, List, Package, Reference, Symbol
+from eclpy import Cons, EclError, List, Package, Symbol
 from eclpy.protocol import (
     decode_lookup,
     decode_result,
     decode_value,
-    dump_value,
     lookup_kind,
     lookup_optional_string,
     lookup_string,
-    to_ecl_protocol,
 )
 
 
@@ -177,136 +173,6 @@ class DecodeTests(unittest.TestCase):
             decode_lookup(lookup("symbol", name=1, package=None))
         with self.assertRaisesRegex(EclError, "expected string or null field 'package'"):
             decode_lookup(lookup("callable", callable_type="function", name="FOO", package=1))
-
-    def test_encode_python_values_to_ecl_protocol(self) -> None:
-        self.assertEqual(to_ecl_protocol(None), {"type": "nil"})
-        self.assertEqual(to_ecl_protocol(False), {"type": "nil"})
-        self.assertEqual(to_ecl_protocol(True), {"type": "true"})
-        self.assertEqual(to_ecl_protocol(12), {"type": "int", "value": "12"})
-        self.assertEqual(
-            to_ecl_protocol(Fraction(5, 3)),
-            {"type": "ratio", "numerator": "5", "denominator": "3"},
-        )
-        self.assertEqual(to_ecl_protocol(1.25), {"type": "float", "value": "1.25"})
-        self.assertEqual(to_ecl_protocol("abc"), {"type": "string", "value": "abc"})
-        self.assertEqual(
-            to_ecl_protocol(Symbol("FOO", "CL")),
-            {"type": "symbol", "name": "FOO", "package": "CL"},
-        )
-        self.assertEqual(
-            to_ecl_protocol(List(1, "x")),
-            {
-                "type": "list",
-                "items": [{"type": "int", "value": "1"}, {"type": "string", "value": "x"}],
-            },
-        )
-        self.assertEqual(
-            to_ecl_protocol(Cons(1, 2)),
-            {
-                "type": "dotted-list",
-                "items": [{"type": "int", "value": "1"}],
-                "tail": {"type": "int", "value": "2"},
-            },
-        )
-        self.assertEqual(
-            to_ecl_protocol({"a": 1}),
-            {
-                "type": "list",
-                "items": [
-                    {
-                        "type": "dotted-list",
-                        "items": [{"type": "string", "value": "a"}],
-                        "tail": {"type": "int", "value": "1"},
-                    }
-                ],
-            },
-        )
-        self.assertEqual(
-            json.loads(dump_value([1, "x"])),
-            {
-                "type": "list",
-                "items": [{"type": "int", "value": "1"}, {"type": "string", "value": "x"}],
-            },
-        )
-        self.assertEqual(
-            to_ecl_protocol(Reference(None, 7, "FUNCTION")),
-            {"type": "ref", "id": 7, "kind": "FUNCTION"},
-        )
-
-        with self.assertRaisesRegex(EclError, "released Lisp reference"):
-            to_ecl_protocol(Reference(None, 7, "FUNCTION", released=True))
-        with self.assertRaisesRegex(TypeError, "non-finite float"):
-            to_ecl_protocol(inf)
-        with self.assertRaisesRegex(TypeError, "cannot convert object"):
-            to_ecl_protocol(object())
-
-
-class EclJSONEncoderTests(unittest.TestCase):
-    def test_encode_mixed_document_at_multiple_depths(self) -> None:
-        document = {
-            "name": "example",
-            "count": 3,
-            "active": True,
-            "nothing": None,
-            "pi": 2.5,
-            "ratio": Fraction(1, 3),
-            "symbol": Symbol("FOO", "CL-USER"),
-            "items": [1, "two", Cons(1, 2), 3.5],
-            "nested": {
-                "inner": Symbol("BAR"),
-                "flag": False,
-                "list": [None, Fraction(2, 5)],
-            },
-        }
-        self.assertEqual(
-            json.loads(json.dumps(document, cls=EclJSONEncoder)),
-            {
-                "name": "example",
-                "count": 3,
-                "active": True,
-                "nothing": None,
-                "pi": 2.5,
-                "ratio": {"type": "ratio", "numerator": "1", "denominator": "3"},
-                "symbol": {"type": "symbol", "name": "FOO", "package": "CL-USER"},
-                "items": [
-                    1,
-                    "two",
-                    {
-                        "type": "dotted-list",
-                        "items": [{"type": "int", "value": "1"}],
-                        "tail": {"type": "int", "value": "2"},
-                    },
-                    3.5,
-                ],
-                "nested": {
-                    "inner": {"type": "symbol", "name": "BAR", "package": None},
-                    "flag": False,
-                    "list": [None, {"type": "ratio", "numerator": "2", "denominator": "5"}],
-                },
-            },
-        )
-
-    def test_encode_live_reference(self) -> None:
-        document = {"ref": Reference(None, 7, "FUNCTION"), "note": "ok"}
-        self.assertEqual(
-            json.loads(json.dumps(document, cls=EclJSONEncoder)),
-            {"ref": {"type": "ref", "id": 7, "kind": "FUNCTION"}, "note": "ok"},
-        )
-
-    def test_encode_released_reference_raises(self) -> None:
-        released = Reference(None, 7, "FUNCTION", released=True)
-        with self.assertRaisesRegex(EclError, "released Lisp reference"):
-            json.dumps({"ref": released}, cls=EclJSONEncoder)
-
-    def test_encode_unsupported_type_falls_back_to_type_error(self) -> None:
-        with self.assertRaises(TypeError):
-            json.dumps({"value": object()}, cls=EclJSONEncoder)
-
-    def test_encode_differs_from_dump_value_for_plain_data(self) -> None:
-        encoder_result = json.loads(json.dumps([1, "x"], cls=EclJSONEncoder))
-        dump_value_result = json.loads(dump_value([1, "x"]))
-        self.assertEqual(encoder_result, [1, "x"])
-        self.assertNotEqual(encoder_result, dump_value_result)
 
 
 if __name__ == "__main__":

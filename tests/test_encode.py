@@ -35,12 +35,22 @@ class EncodeTests(unittest.TestCase):
         self.assertEqual(str(to_data_expr((1, 2))), "(LIST 1 2)")
         self.assertEqual(str(to_data_expr([1, 2])), "(VECTOR 1 2)")
         self.assertEqual(str(to_data_expr(Cons(1, 2))), "(CONS 1 2)")
+        self.assertEqual(str(to_data_expr({})), "(LIST)")
+        self.assertEqual(
+            str(to_data_expr({"a": 1, "b": 2})), '(LIST (CONS "a" 1) (CONS "b" 2))'
+        )
 
     def test_to_data_expr_rejects_invalid_values(self) -> None:
         with self.assertRaisesRegex(EclError, "released Lisp reference"):
             to_data_expr(Reference(None, 7, "OBJECT", released=True))
         with self.assertRaisesRegex(TypeError, "cannot convert object"):
             to_data_expr(object())
+
+    def test_to_data_expr_rejects_non_finite_floats(self) -> None:
+        with self.assertRaisesRegex(TypeError, "non-finite float"):
+            to_data_expr(float("inf"))
+        with self.assertRaisesRegex(TypeError, "non-finite float"):
+            to_data_expr(float("nan"))
 
 
 if __name__ == "__main__":

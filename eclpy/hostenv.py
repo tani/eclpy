@@ -12,7 +12,7 @@ from typing import Any
 
 import wasmtime
 
-from .protocol import dump_value
+from .encode import to_data_expr
 from .wasmmem import (
     WASI_EINVAL,
     WASI_EIO,
@@ -112,12 +112,12 @@ def env_import(
 
 
 def eval_python(caller: wasmtime.Caller, py_globals: dict[str, Any], *args: int) -> int:
-    """Evaluate Python expression source and return its JSON-encoded value."""
+    """Evaluate Python expression source and return its Lisp-encoded value."""
     return run_python(caller, py_globals, "eval", *args)
 
 
 def exec_python(caller: wasmtime.Caller, py_globals: dict[str, Any], *args: int) -> int:
-    """Execute Python statement source and return JSON null."""
+    """Execute Python statement source and return Lisp nil."""
     return run_python(caller, py_globals, "exec", *args)
 
 
@@ -131,7 +131,7 @@ def run_python(
     out_len_ptr: int,
     out_is_error_ptr: int,
 ) -> int:
-    """Run Python code from WASM memory and write a JSON result buffer."""
+    """Run Python code from WASM memory and write a Lisp source result buffer."""
     if src_len < 0:
         return WASI_EINVAL
 
@@ -145,10 +145,10 @@ def run_python(
         source = bytes(wasm_memory.read(caller, src_ptr, src_ptr + src_len)).decode("utf-8")
         code = builtins.compile(source, "<ecl-python>", mode)
         if mode == "eval":
-            result = dump_value(builtins.eval(code, py_globals))
+            result = str(to_data_expr(builtins.eval(code, py_globals)))
         else:
             exec(code, py_globals)
-            result = dump_value(None)
+            result = str(to_data_expr(None))
     except Exception as exc:
         is_error = 1
         result = f"{type(exc).__name__}: {exc}"

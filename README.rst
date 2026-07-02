@@ -11,8 +11,12 @@ Python values. Normal users can start with ``eclpy.syntax``; heavier users can
 drop down to explicit ``SExp`` trees or the raw ``EclSession`` bridge.
 
 The bridge is bidirectional: Lisp code can also evaluate Python through
-``ecl-python:py-eval`` / ``py-exec``. Values cross the boundary as a single
-object-shaped JSON protocol.
+``ecl-python:py-eval`` / ``py-exec``. Every ``Lisp.eval`` result -- including
+the value returned by evaluating a ``py-eval``/``py-exec`` form -- crosses
+into Python over an object-shaped JSON protocol. Values flowing the other
+way, Python into Lisp -- call arguments, and the Python value a
+``py-eval``/``py-exec`` call produces -- render directly as Lisp source text
+and are read and evaluated by ECL's own reader.
 
 .. contents::
    :local:
@@ -151,7 +155,6 @@ Public API
    from eclpy import (
        Cons,
        EclError,
-       EclJSONEncoder,
        EclSession,
        Lisp,
        List,
@@ -293,11 +296,21 @@ Python statements with ``ecl-python:py-exec``:
        assert lisp.eval(eclpy.SExp.raw('(ecl-python:py-eval "1 + 2")')) == 3
        assert lisp.eval(eclpy.SExp.raw('(ecl-python:py-exec "x = 5")')) == eclpy.List()
        assert lisp.eval(eclpy.SExp.raw('(ecl-python:py-eval "x * 2")')) == 10
-       assert lisp.eval(eclpy.SExp.raw('(ecl-python:py-eval "[1, \\"x\\"]")')) == eclpy.List(1, "x")
+       assert lisp.eval(eclpy.SExp.raw('(ecl-python:py-eval "[1, \\"x\\"]")')) == [1, "x"]
+       assert lisp.eval(eclpy.SExp.raw('(ecl-python:py-eval "(1, \\"x\\")")')) == eclpy.List(1, "x")
+       assert lisp.eval(eclpy.SExp.raw('(ecl-python:py-eval "{\\"a\\": 1}")')) == eclpy.List(
+           eclpy.Cons("a", 1)
+       )
 
 ``py-eval`` accepts Python expressions and returns their value. ``py-exec``
 accepts Python statements and returns ``NIL``. The Python globals are scoped to
-the owning ``EclSession`` and persist for the session lifetime.
+the owning ``EclSession`` and persist for the session lifetime. A Python
+``list`` becomes a Lisp vector (round-tripping back as a Python ``list``); a
+``tuple`` becomes a proper Lisp list; a ``dict`` becomes an alist of
+``(key . value)`` pairs, matching how ``eclpy.encode.to_data_expr`` already
+converts these types for ordinary call arguments -- the same converter
+renders a ``py-eval``/``py-exec`` result as Lisp source text for ECL's reader
+to read and evaluate.
 
 This is a full-power host Python evaluation hook, not a sandbox. Only evaluate
 trusted code.
@@ -487,35 +500,6 @@ details:
 	           print(exc.condition_type)
 	           print(exc.message)
 
-Embed Lisp Values in JSON
--------------------------
-
-``EclJSONEncoder`` is a ``json.JSONEncoder`` for ordinary JSON documents that
-happen to carry eclpy Lisp values -- ``Symbol``, ``Cons``, ``Reference``, or
-``fractions.Fraction`` -- mixed in with plain Python data, at any nesting
-depth. Pass it as ``cls=`` to the standard library's ``json.dumps``/``json.dump``:
-
-.. code-block:: python
-
-   import json
-   from fractions import Fraction
-
-   from eclpy import EclJSONEncoder, Symbol
-
-   doc = {"name": "example", "count": 3, "symbol": Symbol("CAR", "COMMON-LISP"),
-          "ratio": Fraction(1, 3)}
-   print(json.dumps(doc, cls=EclJSONEncoder))
-   # {"name": "example", "count": 3,
-   #  "symbol": {"type": "symbol", "name": "CAR", "package": "COMMON-LISP"},
-   #  "ratio": {"type": "ratio", "numerator": "1", "denominator": "3"}}
-
-Plain JSON-native values (``str``, ``int``, ``float``, ``bool``, ``None``,
-``list``, ``dict``) encode exactly as ``json.JSONEncoder`` normally would --
-only the embedded Lisp values render through ``protocol.to_ecl_protocol``. This is
-unrelated to the WASM wire protocol: it does not wrap the whole document in a
-protocol envelope, and it is never used internally by ``Lisp.eval`` or
-``EclSession``.
-
 Security Model
 --------------
 
@@ -560,28 +544,36 @@ The runtime is layered so that each boundary has one responsibility:
 
    ECL inside WebAssembly
    └─ eclpy/runtime.lisp      ecl-python helper package
-      ├─ evaluate / serialize / deserialize
-      ├─ json-encode / json-decode
-      ├─ py-eval / py-exec
+      ├─ evaluate / serialize
+      ├─ json-encode
+      ├─ py-eval / py-exec    read-from-string + eval on the Python result
       └─ ASDF file bridge shims
 
 Value Protocol
 --------------
 
-Both directions use the same object-shaped JSON protocol. The Python side owns
-``protocol.py``; the Lisp side owns ``serialize`` / ``deserialize`` in
-``runtime.lisp``. The C layer does not parse JSON and does not interpret value
-fields; it only moves strings across the WASM boundary and calls Lisp helper
-functions.
+The two directions use different mechanisms, each owned by a different
+module:
+
+* **Python -> Lisp** (``Lisp.eval``/proxy call arguments, and the Python
+  value a ``py-eval``/``py-exec`` call produces): ``encode.py``'s
+  ``to_data_expr`` renders the value as literal Lisp source text -- numbers,
+  strings, symbols, and safely escaped string/symbol literals -- which ECL's
+  own reader parses and evaluates directly. No JSON is involved; the C layer
+  never sees these values, only the finished Lisp source string.
+* **Lisp -> Python** (every ``Lisp.eval`` result, including the value
+  returned by a ``py-eval``/``py-exec`` form): ``protocol.py`` owns decoding;
+  the Lisp side owns ``serialize`` in ``runtime.lisp``. The C layer does not
+  parse JSON and does not interpret value fields; it only moves strings
+  across the WASM boundary and calls Lisp helper functions.
 
 .. code-block:: text
 
-   Python value
-     -> protocol.to_ecl_protocol / json.dumps
-     -> JSON text
-     -> C string shuttle
-     -> ecl-python:json-decode
-     -> ecl-python:deserialize
+   Python value (call argument, or a py-eval/py-exec result)
+     -> encode.to_data_expr
+     -> Lisp source text
+     -> spliced into the evaluated form / (%py-eval source)
+     -> read-from-string + eval
      -> Lisp value
 
    Lisp value
@@ -591,8 +583,8 @@ functions.
      -> json.loads / protocol.decode_value
      -> Python value
 
-The wire shape is a JSON object with named fields. Every top-level Lisp result
-is a protocol envelope:
+The wire shape for the Lisp -> Python direction is a JSON object with named
+fields. Every top-level Lisp result is a protocol envelope:
 
 .. code-block:: text
 
