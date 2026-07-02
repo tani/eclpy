@@ -1,4 +1,10 @@
-"""Low-level Wasmtime host for the ECL WebAssembly runtime."""
+"""Low-level Wasmtime host for the ECL WebAssembly runtime.
+
+``EclSession`` is intentionally string-oriented: callers pass Lisp source text
+and receive either printed text or the JSON text produced by ``runtime.lisp``.
+All Python object conversion, reference ownership, and public API restrictions
+live above this layer.
+"""
 
 from __future__ import annotations
 
@@ -22,9 +28,23 @@ PACKAGE_WASM = Path(__file__).with_name("ecl_eval.wasm")
 BUILD_WASM = Path(__file__).resolve().parents[1] / "build" / "eclpy" / "ecl_eval.wasm"
 
 class EclSession:
-    """A persistent ECL process hosted inside a WebAssembly instance."""
+    """A persistent ECL process hosted inside one WebAssembly instance.
+
+    The session owns Wasmtime engine/store state, WASI setup, Emscripten-style
+    host imports, and the C ABI exports used to allocate buffers and evaluate
+    Lisp forms.
+    """
 
     def __init__(self, wasm_path: str | os.PathLike[str] | None = None) -> None:
+        """Load and initialize the ECL WebAssembly module.
+
+        :param wasm_path: Optional module path. When omitted, ``ECL_WASM`` wins
+            over the packaged artifact, and the build-tree artifact is the last
+            fallback.
+        :raises FileNotFoundError: If no runtime artifact can be found.
+        :raises eclpy.EclError: If module instantiation or ECL initialization
+            fails.
+        """
         self.wasm_path = _resolve_wasm_path(wasm_path)
         if not self.wasm_path.is_file():
             message = (
@@ -76,7 +96,11 @@ class EclSession:
             raise EclError(message)
 
     def eval(self, code: str) -> str:
-        """Evaluate Lisp source and return the printed last primary value."""
+        """Evaluate Lisp source and return the printed last primary value.
+
+        This bypasses the JSON value protocol and is used by the CLI, tests, and
+        SWANK startup paths that need native ECL behavior.
+        """
         if self._closed:
             message = "ECL session is closed"
             raise EclError(message)
@@ -85,7 +109,11 @@ class EclSession:
         return self._eval_with(self._eval, code)
 
     def eval_json(self, code: str) -> str:
-        """Evaluate Lisp source and return the last primary value as JSON."""
+        """Evaluate Lisp source and return the last primary value as JSON text.
+
+        High-level callers pass this text to :mod:`eclpy.protocol` for strict
+        envelope validation and Python object construction.
+        """
         if self._closed:
             message = "ECL session is closed"
             raise EclError(message)
@@ -94,6 +122,11 @@ class EclSession:
         return self._eval_with(self._eval_json, code)
 
     def _eval_with(self, func: wasmtime.Func, code: str) -> str:
+        """Call one C evaluation export with UTF-8 source text.
+
+        Input and output buffers are allocated inside WASM linear memory and
+        always freed in this method, even when ECL reports an error.
+        """
         data = code.encode("utf-8")
 
         with self._lock:
@@ -120,7 +153,11 @@ class EclSession:
                     self._free(self._store, out_ptr)
 
     def close(self) -> None:
-        """Shut down the ECL runtime if the session is still open."""
+        """Shut down the ECL runtime if the session is still open.
+
+        The method is idempotent. Calls after shutdown raise
+        :class:`eclpy.EclError` from :meth:`eval` and :meth:`eval_json`.
+        """
         if self._closed:
             return
         with self._lock:
@@ -129,6 +166,7 @@ class EclSession:
             self._closed = True
 
     def __enter__(self) -> Self:
+        """Enter the session context and return ``self``."""
         return self
 
     def __exit__(
@@ -137,9 +175,11 @@ class EclSession:
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> None:
+        """Leave the session context by calling :meth:`close`."""
         self.close()
 
     def _call_i32(self, func: wasmtime.Func, *args: int) -> int:
+        """Call a Wasm export that must return an integer pointer or status."""
         result = func(self._store, *args)
         if not isinstance(result, int):
             message = "ECL WASM function returned a non-integer pointer"
@@ -147,6 +187,7 @@ class EclSession:
         return result
 
     def _read_last_error(self) -> str:
+        """Read the C bridge's last error string from WASM memory."""
         return read_c_string(self._memory, self._store, self._call_i32(self._last_error))
 
 

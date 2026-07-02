@@ -1,4 +1,10 @@
-"""Pythonic package proxies for calling Lisp symbols."""
+"""Pythonic package proxies for calling Lisp symbols.
+
+Package proxies make Common Lisp symbols feel like Python attributes while
+preserving Lisp lookup semantics. Attribute names are translated to candidate
+symbol names, Lisp reports whether the symbol is callable/value/symbol, and the
+proxy returns the corresponding Python wrapper.
+"""
 
 from __future__ import annotations
 
@@ -37,11 +43,13 @@ _OPERATOR_NAMES = {
 
 @dataclass(frozen=True)
 class _CallableSymbol:
+    """Callable proxy for a Lisp function-like symbol."""
     lisp: Lisp
     name: str
     package: str | None = None
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        """Evaluate the resolved Lisp symbol with Syntax API argument conversion."""
         parts = [SExp.symbol(self.name, self.package)]
         parts.extend(to_syntax_api_expr(arg) for arg in args)
         for key, value in kwargs.items():
@@ -50,27 +58,35 @@ class _CallableSymbol:
         return self.lisp._eval_sexp(SExp.list(*parts))
 
     def __repr__(self) -> str:
+        """Render the symbol with package qualification when known."""
         package = f"{self.package}::" if self.package else ""
         return f"{package}{self.name}"
 
 
 @dataclass(frozen=True)
 class Package:
-    """A Python view over a Common Lisp package."""
+    """A Python view over a Common Lisp package.
+
+    Attribute access performs a live lookup in the underlying Lisp image.
+    Function-like symbols become callables; bound variables decode to Python
+    values; ordinary symbols become :class:`eclpy.objects.Symbol`.
+    """
 
     lisp: Lisp
     name: str
 
     def __getattr__(self, name: str) -> Any:
+        """Resolve a Python attribute name to a Lisp package member."""
         if name.startswith("_"):
             raise AttributeError(name)
         return self._lookup(name)
 
     def symbol(self, name: str) -> Symbol:
-        """Return a symbol interned in this package."""
+        """Return a symbol interned in this package without checking bindings."""
         return Symbol(name.upper(), self.name)
 
     def _lookup(self, attribute: str) -> Any:
+        """Try every translated symbol spelling for one Python attribute."""
         for symbol_name in _attribute_candidates(attribute):
             form = SExp.list(
                 SExp.atom("ecl-python:lookup-symbol"),
@@ -97,15 +113,21 @@ class Package:
         raise AttributeError(attribute)
 
     def __repr__(self) -> str:
+        """Return a readable package proxy representation."""
         return f"Package({self.name!r})"
 
 
 def find_package(lisp: Lisp, name: str) -> Package:
-    """Return a Python view over a Common Lisp package."""
+    """Return a Python view over a Common Lisp package.
+
+    ``name`` is uppercased because Common Lisp package names are conventionally
+    uppercase and ECL's default reader preserves that convention.
+    """
     return Package(lisp, name.upper())
 
 
 def _attribute_candidates(attribute: str) -> list[str]:
+    """Return candidate Lisp symbol names for a Python attribute."""
     if attribute in _OPERATOR_NAMES:
         return [_OPERATOR_NAMES[attribute]]
 
@@ -116,6 +138,7 @@ def _attribute_candidates(attribute: str) -> list[str]:
 
 
 def _attribute_to_symbol_name(attribute: str) -> str:
+    """Translate Python-friendly attribute spelling to a Lisp symbol name."""
     lowered = attribute.lower()
     suffixes = (
         ("tilde", "~"),

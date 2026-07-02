@@ -1,4 +1,10 @@
-"""High-level Python API for evaluating Common Lisp through ECL."""
+"""High-level facade for evaluating Common Lisp through ECL.
+
+The :class:`Lisp` object owns the user-facing session setup: it boots or wraps
+an :class:`~eclpy.session.EclSession`, loads the Lisp helper package, points
+that helper at bundled ASDF/SWANK source files, and tracks Python-owned Lisp
+references until they are released.
+"""
 
 from __future__ import annotations
 
@@ -22,7 +28,13 @@ SWANK_SOURCE_DIRECTORY = Path(__file__).with_name("swank")
 
 
 class Lisp:
-    """A cl4py-like interface to an ECL WebAssembly session."""
+    """A cl4py-like interface to one ECL WebAssembly session.
+
+    Constructing a ``Lisp`` instance loads ``runtime.lisp`` into the underlying
+    ECL image. The high-level :meth:`eval` method accepts only explicit
+    :class:`~eclpy.sexp.SExp` nodes so the boundary between Python data and Lisp
+    source stays visible.
+    """
 
     def __init__(
         self,
@@ -30,6 +42,14 @@ class Lisp:
         *,
         session: EclSession | None = None,
     ) -> None:
+        """Create a high-level Lisp facade.
+
+        :param wasm_path: Optional path to an ECL WebAssembly module. Ignored
+            when ``session`` is supplied.
+        :param session: Optional pre-built low-level session. Passing a session
+            transfers evaluation through that session but leaves shutdown
+            ownership with the caller.
+        """
         self.session = session or EclSession(wasm_path)
         self._owns_session = session is None
         self._closed = False
@@ -49,7 +69,15 @@ class Lisp:
         self.session.eval(str(swank_form))
 
     def eval(self, form: Any) -> Any:
-        """Evaluate an explicit S-expression."""
+        """Evaluate an explicit S-expression and decode its Lisp result.
+
+        :param form: A value produced by :class:`eclpy.SExp` or
+            :mod:`eclpy.syntax`.
+        :raises TypeError: If ``form`` is not an ``SExp``. This guard prevents
+            accidental raw-string evaluation through the high-level API.
+        :raises eclpy.EclError: If ECL signals a condition while evaluating the
+            form.
+        """
         if not isinstance(form, SExp):
             message = "Lisp.eval only accepts SExp; use eclpy.SExp.* or eclpy.syntax.expr(...)"
             raise TypeError(message)
@@ -78,7 +106,12 @@ class Lisp:
         self.session.eval(str(form))
 
     def close(self) -> None:
-        """Release Lisp references and close the owned ECL session."""
+        """Release Lisp references and close the owned ECL session.
+
+        The method is idempotent. If this facade wraps a caller-supplied
+        :class:`~eclpy.session.EclSession`, references are released but the
+        session itself remains open for the caller to manage.
+        """
         if self._closed:
             return
         self._release_all_references()
@@ -87,12 +120,20 @@ class Lisp:
         self._closed = True
 
     def __enter__(self) -> Self:
+        """Enter the facade context and return ``self``."""
         return self
 
     def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        """Leave the facade context by calling :meth:`close`."""
         self.close()
 
     def _eval_sexp(self, sexp: SExp) -> Any:
+        """Evaluate ``sexp`` through ``ecl-python:evaluate``.
+
+        The helper wraps user code in a zero-argument lambda so Lisp conditions
+        become protocol error envelopes instead of escaping through the raw C
+        ABI.
+        """
         if self._closed:
             message = "Lisp session is closed"
             raise EclError(message)
@@ -105,14 +146,17 @@ class Lisp:
         return decode_result(result, self)
 
     def _eval_helper(self, sexp: SExp) -> Any:
+        """Return one decoded JSON envelope produced by the low-level session."""
         return json.loads(self.session.eval_json(str(sexp)))
 
     def _make_reference(self, object_id: int, type_name: str) -> Reference:
+        """Register a Lisp object reference and return its Python handle."""
         reference = Reference(self, object_id, type_name)
         self._references[object_id] = reference
         return reference
 
     def _release_reference(self, reference: Reference) -> None:
+        """Release one Python-owned Lisp reference if it is still live."""
         if reference.released:
             return
         self._references.pop(reference.object_id, None)
@@ -129,6 +173,7 @@ class Lisp:
         reference.released = True
 
     def _release_all_references(self) -> None:
+        """Release all Python-owned Lisp references in one helper call."""
         if self._references and not self._closed:
             with suppress(EclError):
                 self.session.eval(str(SExp.list(SExp.atom("ecl-python:release-all-objects"))))

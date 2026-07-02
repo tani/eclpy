@@ -1,4 +1,9 @@
-"""Python bindings for an ECL WebAssembly runtime."""
+"""Public package surface for eclpy.
+
+Import from ``eclpy`` for the stable facade, low-level session, S-expression
+builder, Lisp value objects, and shared error type. Ergonomic expression helper
+functions live in :mod:`eclpy.syntax`.
+"""
 
 from .errors import EclError
 from .lisp import Lisp

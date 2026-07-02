@@ -8,6 +8,7 @@ uv run basedpyright
 uv run python -m unittest discover -s tests
 uv run coverage run -m unittest discover -s tests
 uv run coverage report -m
+uv run sphinx-build -b html docs docs/_build/html
 ```
 
 The tests cover raw low-level evaluation, strict `SExp` evaluation, Syntax
@@ -18,6 +19,17 @@ lifecycle, `(require 'asdf)` module loading, missing runtime errors,
 Lisp-side exceptions, internal runtime error paths, and the SWANK-RPC wire
 protocol served by `Lisp.start_swank`. Coverage is configured to fail
 below 100% for the Python package.
+
+## Build the Sphinx Documentation
+
+The documentation source is ordinary Markdown parsed by MyST plus Sphinx
+autodoc pages that import `eclpy` docstrings. The Common Lisp runtime is
+included with `literalinclude`, so changes to `runtime.lisp`, `python.lisp`, or
+`swank/loader.lisp` show up in the generated site without duplicating source.
+
+```sh
+uv run sphinx-build -b html docs docs/_build/html
+```
 
 ## Build the WASM Runtime
 

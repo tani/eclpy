@@ -29,7 +29,13 @@ _LookupKind = Literal["missing", "callable", "value", "symbol"]
 
 
 def decode_result(node: Any, lisp: Any) -> Any:
-    """Decode a top-level success or error envelope from ECL."""
+    """Decode a top-level success or error envelope from ECL.
+
+    :param node: JSON-decoded Python object returned by ``EclSession.eval_json``.
+    :param lisp: Owning :class:`eclpy.Lisp` facade, used to create package
+        proxies and reference handles.
+    :raises eclpy.EclError: For malformed envelopes or Lisp-side errors.
+    """
     envelope = _protocol_envelope(node)
     status = _required_string(envelope, "status")
     match status:
@@ -52,7 +58,12 @@ def decode_result(node: Any, lisp: Any) -> Any:
 
 
 def decode_lookup(node: Any) -> dict[str, Any]:
-    """Validate a package lookup envelope produced by Lisp."""
+    """Validate a package lookup envelope produced by Lisp.
+
+    The lookup protocol is separate from ordinary value decoding because package
+    proxies need to distinguish missing symbols, callable symbols, bound values,
+    and ordinary symbols before deciding which Python wrapper to return.
+    """
     envelope = _protocol_envelope(node)
     kind = _required_string(envelope, "kind")
     match kind:
@@ -84,7 +95,12 @@ def decode_lookup(node: Any) -> dict[str, Any]:
 
 
 def decode_value(node: Any, lisp: Any) -> Any:
-    """Decode one serialized Lisp value into its Python representation."""
+    """Decode one serialized Lisp value into its Python representation.
+
+    The decoder is intentionally strict: every value type must have exactly the
+    expected fields so protocol drift fails loudly instead of silently ignoring
+    data.
+    """
     value = _object_node(node, "value")
     value_type = _required_string(value, "type")
     match value_type:
@@ -157,12 +173,14 @@ def lookup_optional_string(node: dict[str, Any], key: str) -> str | None:
 
 
 def _protocol_envelope(node: Any) -> dict[str, Any]:
+    """Validate the common protocol name/version wrapper."""
     envelope = _object_node(node, "protocol envelope")
     _expect_protocol(envelope)
     return envelope
 
 
 def _expect_protocol(node: dict[str, Any]) -> None:
+    """Ensure a JSON object belongs to the supported eclpy protocol version."""
     if node.get("protocol") != PROTOCOL_NAME:
         message = f"expected eclpy protocol envelope, got {node!r}"
         raise EclError(message)
@@ -172,6 +190,7 @@ def _expect_protocol(node: dict[str, Any]) -> None:
 
 
 def _object_node(node: Any, context: str) -> dict[str, Any]:
+    """Return ``node`` as a JSON object with string keys."""
     if not isinstance(node, dict):
         message = f"expected {context} object, got {node!r}"
         raise EclError(message)
@@ -182,6 +201,7 @@ def _object_node(node: Any, context: str) -> dict[str, Any]:
 
 
 def _expect_exact_keys(node: dict[str, Any], expected: set[str], context: str) -> None:
+    """Require an exact object shape for defensive protocol validation."""
     actual = set(node)
     if actual != expected:
         message = f"malformed ECL {context}: expected keys {sorted(expected)}, got {sorted(actual)}"
@@ -189,6 +209,7 @@ def _expect_exact_keys(node: dict[str, Any], expected: set[str], context: str) -
 
 
 def _required_string(node: dict[str, Any], key: str) -> str:
+    """Read a required field whose value must be a string."""
     value = _required(node, key)
     if not isinstance(value, str):
         message = f"expected string field {key!r}, got {value!r}"
@@ -197,6 +218,7 @@ def _required_string(node: dict[str, Any], key: str) -> str:
 
 
 def _optional_string(node: dict[str, Any], key: str) -> str | None:
+    """Read a required field whose value may be a string or ``null``."""
     value = _required(node, key)
     if value is None:
         return None
@@ -207,6 +229,7 @@ def _optional_string(node: dict[str, Any], key: str) -> str | None:
 
 
 def _required_list(node: dict[str, Any], key: str) -> list[Any]:
+    """Read a required field whose value must be a JSON array."""
     value = _required(node, key)
     if not isinstance(value, list):
         message = f"expected list field {key!r}, got {value!r}"
@@ -215,6 +238,7 @@ def _required_list(node: dict[str, Any], key: str) -> list[Any]:
 
 
 def _required_int(node: dict[str, Any], key: str) -> int:
+    """Read a required field whose value must be a non-boolean integer."""
     value = _required(node, key)
     if not isinstance(value, int) or isinstance(value, bool):
         message = f"expected integer field {key!r}, got {value!r}"
@@ -223,6 +247,7 @@ def _required_int(node: dict[str, Any], key: str) -> int:
 
 
 def _required_decimal_string(node: dict[str, Any], key: str) -> str:
+    """Read a required field whose value must be a decimal integer string."""
     value = _required_string(node, key)
     digits = value[1:] if value.startswith("-") else value
     if not digits or not digits.isdecimal():
@@ -232,6 +257,7 @@ def _required_decimal_string(node: dict[str, Any], key: str) -> str:
 
 
 def _required(node: dict[str, Any], key: str) -> Any:
+    """Read a required field without validating its value type."""
     if key not in node:
         message = f"missing required field {key!r}"
         raise EclError(message)

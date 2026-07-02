@@ -2,45 +2,62 @@
 
 The runtime is layered so that each boundary has one responsibility.
 
+The Python layer has three entry paths. They deliberately converge at
+`Lisp._eval_sexp`, so all high-level calls share one reference table, one
+JSON decoder, and one low-level session boundary.
+
 ```mermaid
+%%{init: {"themeVariables": {"fontSize": "18px"}}}%%
 flowchart TB
-    subgraph PY[Python process]
-        direction TB
-        subgraph HL["High-level API"]
-            direction LR
-            lisp_py["lisp.py<br/>Lisp facade, Reference lifecycle"]
-            proxy_py["proxy.py<br/>package / callable-symbol proxies"]
-            syntax_py["syntax.py<br/>L.expr / L.quote / L.array"]
-        end
-        subgraph VS["Value and syntax"]
-            direction LR
-            sexp_py["sexp.py<br/>SExp tree -&gt; safe Lisp source"]
-            encode_py["encode.py<br/>Python values -&gt; Lisp source (call args)"]
-            protocol_py["protocol.py<br/>object-shaped JSON protocol"]
-            objects_py["objects.py<br/>Symbol / List / Cons / Reference"]
-        end
-        subgraph LL["Low-level host"]
-            direction LR
-            session_py["session.py<br/>Wasmtime lifecycle, eval, eval_json"]
-            hostenv_py["hostenv.py<br/>env imports: host files, stat, Python eval/exec"]
-            wasmmem_py["wasmmem.py<br/>linear-memory helpers, WASI errno"]
-        end
-        subgraph WB["WASM boundary"]
-            cbridge["native/eclpy_eval.c<br/>ECL boot, C ABI, string shuttling"]
-        end
-        HL --> VS --> LL --> WB
-    end
+    user["User code"]
+    choose{"How is Lisp code built?"}
+    syntax["syntax.py<br/>Python literals as Lisp forms"]
+    proxy["proxy.py<br/>live package lookup and calls"]
+    direct["SExp<br/>explicit source tree"]
+    encode["encode.py<br/>data arguments become Lisp literals"]
+    sexp["sexp.py<br/>one safe renderer"]
+    lisp["lisp.py<br/>one facade, one reference table"]
+    session["session.py<br/>one Wasmtime boundary"]
+    protocol["protocol.py + objects.py<br/>JSON result -> Python values"]
 
-    subgraph ECL["ECL inside WebAssembly"]
-        runtime_lisp["eclpy/runtime.lisp<br/>ecl-python helper package<br/>evaluate / serialize / json-encode<br/>py-eval / py-exec / ASDF file bridge shims"]
-    end
+    user --> choose
+    choose -->|"convenience"| syntax
+    choose -->|"Common Lisp package API"| proxy
+    choose -->|"full control"| direct
+    proxy -->|"call args"| encode
+    syntax --> sexp
+    direct --> sexp
+    encode --> sexp
+    sexp -->|"only high-level input accepted"| lisp
+    lisp --> session
+    session -->|"result envelope"| protocol
+    protocol -->|"Reference handles release through owner"| lisp
+    protocol --> user
+```
 
-    subgraph DSL["Explicit-load DSL (never loaded automatically)"]
-        python_lisp["eclpy/python.lisp<br/>PY / PY.RUNTIME / PY.INTERNAL<br/>Pythonic object protocol on py-eval/py-exec"]
-    end
+The Wasm side is a separate boundary. The C bridge moves bytes and calls ECL;
+`runtime.lisp` owns Lisp-level policy such as serialization, reference storage,
+ASDF loading, Python eval/exec, and SWANK startup.
 
-    WB -->|WASM host imports| ECL
-    ECL -.->|load explicitly| DSL
+```mermaid
+%%{init: {"themeVariables": {"fontSize": "18px"}}}%%
+flowchart TB
+    session["session.py<br/>alloc source, call export, free buffers"]
+    cbridge["native/eclpy_eval.c<br/>boot ECL, read forms, call runtime helpers"]
+    runtime{"runtime.lisp policy layer"}
+    serializer["serialize/json-encode<br/>Lisp values -> protocol JSON"]
+    refs["*objects* table<br/>opaque Reference ids"]
+    hostenv["hostenv.py imports<br/>files, sockets, Python eval/exec"]
+    lazy["lazy source loads<br/>ASDF and SWANK only when requested"]
+    pydsl["python.lisp<br/>explicit PY DSL load"]
+
+    session --> cbridge
+    cbridge --> runtime
+    runtime --> serializer
+    runtime --> refs
+    runtime -->|"native-load, OPEN, sockets, py-eval"| hostenv
+    hostenv -->|"read/probe/stat"| lazy
+    pydsl -.->|"uses py-eval/py-exec"| runtime
 ```
 
 ## Value Protocol
@@ -62,27 +79,24 @@ does not interpret value fields; it only moves strings across the WASM
 boundary and calls Lisp helper functions.
 
 ```mermaid
+%%{init: {"themeVariables": {"fontSize": "18px"}}}%%
 flowchart LR
-    subgraph "Python -> Lisp"
-        direction LR
-        pv["Python value<br/>(call arg or py-eval/py-exec result)"] --> enc["encode.to_data_expr"]
-        enc --> src["Lisp source text"]
-        src --> spliced["spliced into the evaluated form<br/>/ (%py-eval source)"]
-        spliced --> rd["read-from-string + eval"]
-        rd --> lv["Lisp value"]
-    end
-```
+    pyin{"Python value<br/>or SExp"}
+    source["Lisp source text<br/>not JSON"]
+    eval["ECL reader + evaluator"]
+    lisp{"Lisp value"}
+    json["Protocol JSON<br/>status + typed value"]
+    pyout{"Python value"}
 
-```mermaid
-flowchart LR
-    subgraph "Lisp -> Python"
-        direction LR
-        lv2["Lisp value"] --> ser["ecl-python:serialize"]
-        ser --> je["ecl-python:json-encode"]
-        je --> shuttle["C string shuttle"]
-        shuttle --> dec["json.loads / protocol.decode_value"]
-        dec --> pv2["Python value"]
-    end
+    pyin -->|"SExp: render directly"| source
+    pyin -->|"data: encode.to_data_expr"| source
+    source --> eval
+    eval --> lisp
+    lisp -->|"runtime.lisp serialize/json-encode"| json
+    json -->|"protocol.decode_result"| pyout
+
+    pyeval["py-eval / py-exec result"] -.->|"hostenv encodes as Lisp source"| source
+    json -.->|"C bridge only moves UTF-8 bytes"| pyout
 ```
 
 The wire shape for the Lisp -> Python direction is a JSON object with

@@ -1,4 +1,10 @@
-"""Encode Python values as explicit Lisp S-expression syntax."""
+"""Encode Python values as explicit Lisp S-expression syntax.
+
+The encoder has two public modes. Syntax API conversion treats Python strings
+as Lisp symbols and tuples/lists as code-shaped forms. Data conversion treats
+Python values as literal data and emits Lisp code that reconstructs equivalent
+objects inside ECL.
+"""
 
 from __future__ import annotations
 
@@ -26,7 +32,12 @@ class _PackageLike(Protocol):
 
 
 def to_syntax_api_expr(value: Any) -> SExp:
-    """Convert a Python Syntax API value into a Lisp expression."""
+    """Convert one Syntax API value into a Lisp expression.
+
+    Strings become symbols, non-empty tuples/lists whose first item looks like a
+    callable become forms, and ordinary Python data falls back to
+    :func:`to_data_expr`.
+    """
     match value:
         case SExp() as sexp:
             return sexp
@@ -46,7 +57,11 @@ def to_syntax_api_expr(value: Any) -> SExp:
 
 
 def to_syntax_api_literal(value: Any) -> SExp:
-    """Convert a Python Syntax API value into a literal Lisp expression."""
+    """Convert one Syntax API value into literal Lisp syntax.
+
+    This is used under quote-like contexts where sequences should become list
+    contents instead of executable forms.
+    """
     match value:
         case SExp() as sexp:
             return sexp
@@ -68,7 +83,14 @@ def to_syntax_api_literal_list(items: tuple[Any, ...]) -> SExp:
 
 
 def to_data_expr(value: Any) -> SExp:
-    """Convert a Python value into a Lisp expression that reconstructs data."""
+    """Convert a Python value into Lisp code that reconstructs data.
+
+    ``None`` and ``False`` become ``nil``; ``True`` becomes ``t``; tuples and
+    :class:`eclpy.objects.List` become proper lists; Python lists become
+    vectors; dictionaries become association lists. Non-finite floats are
+    rejected because ECL reader portability is more important than guessing an
+    implementation-specific spelling.
+    """
     match value:
         case SExp() as sexp:
             return sexp
@@ -125,14 +147,17 @@ def to_data_expr(value: Any) -> SExp:
 
 
 def _is_callable_symbol(value: Any) -> bool:
+    """Return whether ``value`` behaves like a package-proxy callable symbol."""
     return isinstance(value, _CallableSymbolLike)
 
 
 def _is_package(value: Any) -> bool:
+    """Return whether ``value`` behaves like a Common Lisp package proxy."""
     return isinstance(value, _PackageLike)
 
 
 def _finite_float(value: float) -> float:
+    """Reject infinities and NaNs before rendering a Lisp float literal."""
     if not math.isfinite(value):
         message = "cannot convert a non-finite float to Lisp"
         raise TypeError(message)

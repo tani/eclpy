@@ -50,7 +50,17 @@ command-line REPL, Pythonic package proxies, and the full public API.
 - [docs/architecture.md](docs/architecture.md) -- module layering and the
   Python<->Lisp value protocol.
 - [docs/development.md](docs/development.md) -- running tests, building the
-  WASM runtime, building a wheel.
+  WASM runtime, building wheels, and building Sphinx docs.
+- [docs/api-reference.md](docs/api-reference.md) -- Sphinx autodoc page for the
+  Python modules.
+- [docs/lisp-source.md](docs/lisp-source.md) -- Sphinx literalinclude page for
+  the bundled Lisp runtime and `PY` DSL source.
+
+Build the Sphinx site locally with:
+
+```sh
+uv run sphinx-build -b html docs docs/_build/html
+```
 
 ## License
 

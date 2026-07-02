@@ -1,4 +1,10 @@
-"""Fluent helpers for aggressively converting Python literals into Lisp syntax."""
+"""Fluent helpers for converting Python literals into Lisp syntax.
+
+This module is the ergonomic layer above :mod:`eclpy.sexp`. It deliberately
+interprets strings as Lisp symbols and Python sequences as Lisp forms when that
+looks natural; use :class:`eclpy.SExp` directly when every token must be spelled
+explicitly.
+"""
 
 from __future__ import annotations
 
@@ -23,12 +29,20 @@ __all__ = [
 
 
 def expr(value: Any) -> SExp:
-    """Convert one Python Syntax API value into an S-expression."""
+    """Convert one Python Syntax API value into an S-expression.
+
+    Example: ``expr((\"+\", 1, 2))`` renders as ``(+ 1 2)`` while
+    ``expr((1, 2))`` renders as a quoted literal list.
+    """
     return to_syntax_api_expr(value)
 
 
 def string(value: str) -> SExp:
-    """Create an escaped Lisp string literal."""
+    """Create an escaped Lisp string literal.
+
+    Unlike :func:`expr`, this keeps a Python string as string data instead of
+    converting it to a Lisp symbol.
+    """
     return SExp.string(value)
 
 
@@ -38,12 +52,16 @@ def symbol(name: str, package: str | None = None) -> SExp:
 
 
 def keyword(name: str) -> SExp:
-    """Create a Lisp keyword symbol."""
+    """Create a Lisp keyword symbol from a Python-friendly name."""
     return SExp.keyword(name)
 
 
 def array(items: Any) -> SExp:
-    """Create a Lisp vector or multidimensional array literal."""
+    """Create a Lisp vector or multidimensional array literal.
+
+    Nested Python sequences must be rectangular. One-dimensional input renders
+    as ``#(...)``; deeper input renders as ``#nA(...)``.
+    """
     if not _is_array_sequence(items):
         message = "array expects one list or tuple"
         raise TypeError(message)
@@ -56,7 +74,7 @@ def array(items: Any) -> SExp:
 
 
 def path(value: str | os.PathLike[str]) -> SExp:
-    """Create a Lisp pathname literal."""
+    """Create a Lisp pathname reader literal from a host path."""
     return SExp.raw(f"#p{SExp.string(os.fspath(value))}")
 
 
@@ -71,15 +89,17 @@ def function(value: Any) -> SExp:
 
 
 def raw(source: str) -> SExp:
-    """Embed raw Lisp source as an S-expression node."""
+    """Embed raw trusted Lisp source as an S-expression node."""
     return SExp.raw(source)
 
 
 def _is_array_sequence(value: Any) -> bool:
+    """Return whether ``value`` can be traversed as an array literal."""
     return isinstance(value, (tuple, list, List))
 
 
 def _array_shape(value: Any) -> tuple[int, ...]:
+    """Return the rectangular shape for a nested Lisp array literal."""
     if not _is_array_sequence(value):
         return ()
 
@@ -97,6 +117,7 @@ def _array_shape(value: Any) -> tuple[int, ...]:
 
 
 def _array_contents(value: Any) -> str:
+    """Render nested array contents after shape validation."""
     if _is_array_sequence(value):
         return "(" + " ".join(_array_contents(item) for item in tuple(value)) + ")"
     return str(to_syntax_api_literal(value))

@@ -1,4 +1,10 @@
-"""Wasmtime ``env`` imports implemented by the Python host."""
+"""Wasmtime ``env`` imports implemented by the Python host.
+
+The Emscripten-built ECL module imports a small set of functions from an
+``env`` namespace. This module supplies those callbacks: host file reads for
+ASDF/SWANK, Python ``eval``/``exec`` for the Lisp helper package, minimal
+startup syscalls, and TCP socket operations used by SWANK.
+"""
 
 from __future__ import annotations
 
@@ -32,7 +38,12 @@ def define_emscripten_imports(
     module: wasmtime.Module,
     py_globals: dict[str, Any],
 ) -> None:
-    """Define all Emscripten-style ``env`` imports required by a module."""
+    """Define all Emscripten-style ``env`` imports required by a module.
+
+    The function inspects the module's import list and registers only the
+    callbacks this particular build asks for. Socket handles and Python globals
+    are shared across all callbacks for the session.
+    """
     seen: set[str] = set()
     sockets: dict[int, socket_module.socket] = {}
     next_handle = [1]
@@ -63,7 +74,12 @@ def env_import(
     sockets: dict[int, socket_module.socket] | None = None,
     next_handle: list[int] | None = None,
 ) -> Any:
-    """Return the Python callback for one ``env`` import name."""
+    """Return the Python callback for one ``env`` import name.
+
+    Unknown value-returning imports fail with ``-WASI_ENOSYS``; unknown void
+    imports are ignored. This matches Emscripten startup probes that ask for
+    more host functions than the current ECL path actually uses.
+    """
     if sockets is None:
         sockets = {}
     if next_handle is None:
@@ -117,7 +133,7 @@ def eval_python(caller: wasmtime.Caller, py_globals: dict[str, Any], *args: int)
 
 
 def exec_python(caller: wasmtime.Caller, py_globals: dict[str, Any], *args: int) -> int:
-    """Execute Python statement source and return Lisp nil."""
+    """Execute Python statement source and return Lisp ``nil``."""
     return run_python(caller, py_globals, "exec", *args)
 
 
@@ -131,7 +147,12 @@ def run_python(
     out_len_ptr: int,
     out_is_error_ptr: int,
 ) -> int:
-    """Run Python code from WASM memory and write a Lisp source result buffer."""
+    """Run Python code from WASM memory and write a Lisp source result buffer.
+
+    Successful values are converted with :func:`eclpy.encode.to_data_expr`, so
+    the Lisp side can read and evaluate ordinary Lisp source instead of parsing
+    JSON on the return path.
+    """
     if src_len < 0:
         return WASI_EINVAL
 
@@ -172,7 +193,11 @@ def read_host_file(
     out_data_ptr: int,
     out_len_ptr: int,
 ) -> int:
-    """Read a host file into a WASM-allocated buffer."""
+    """Read a host file into a WASM-allocated buffer.
+
+    The Lisp side uses this for explicit ``load`` calls, ASDF source loading,
+    SWANK source loading, and SLIME secret/source probes.
+    """
     if path_len < 0:
         return WASI_EINVAL
 
@@ -198,7 +223,11 @@ def stat_host_file(
     out_kind_ptr: int,
     out_mtime_ptr: int,
 ) -> int:
-    """Stat a host path for the WASM runtime."""
+    """Stat a host path for the WASM runtime.
+
+    The callback writes a tiny kind code and modification time, enough for ASDF
+    freshness checks without exposing a full POSIX stat structure.
+    """
     if path_len < 0:
         return WASI_EINVAL
 

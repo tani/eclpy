@@ -1,4 +1,10 @@
-"""Build Lisp S-expression syntax trees before string rendering."""
+"""Render-safe S-expression building blocks.
+
+The public :class:`SExp` factory methods build a tiny immutable syntax tree
+instead of concatenating Lisp source directly. Rendering is delayed until the
+tree crosses into :class:`eclpy.session.EclSession`; this keeps quoting,
+package qualification, string escaping, and empty-list spelling centralized.
+"""
 
 from __future__ import annotations
 
@@ -18,16 +24,30 @@ _FLOAT_TOKEN_RE = re.compile(
 
 
 class SExp:
-    """A Lisp S-expression syntax tree."""
+    """A Lisp S-expression syntax tree.
+
+    ``SExp`` values are source nodes, not evaluated Lisp objects. They are the
+    strict API accepted by :meth:`eclpy.Lisp.eval`; use :mod:`eclpy.syntax` when
+    you want Python values aggressively converted into these nodes.
+    """
 
     @staticmethod
     def atom(token: str) -> SExp:
-        """Create an unescaped atom from an already-valid Lisp token."""
+        """Create an atom from an already-valid Lisp token.
+
+        Use this for reader tokens that should not be escaped or normalized,
+        such as ``"nil"``, ``"t"``, or fully qualified helper names.
+        """
         return _SAtom(token)
 
     @staticmethod
     def symbol(name: str, package: str | None = None) -> SExp:
-        """Create a Lisp symbol reference."""
+        """Create a Lisp symbol reference.
+
+        :param name: Symbol name before token escaping.
+        :param package: Optional package designator. ``"KEYWORD"`` is rendered
+            with a single leading colon; other packages use ``PACKAGE::NAME``.
+        """
         token = _symbol_token(name)
         if package is None:
             return _SAtom(token)
@@ -62,12 +82,20 @@ class SExp:
 
     @staticmethod
     def raw(source: str) -> SExp:
-        """Embed raw Lisp source as an S-expression node."""
+        """Embed raw Lisp source as an S-expression node.
+
+        This is the intentional escape hatch. The source is emitted verbatim, so
+        callers must only pass trusted Lisp code.
+        """
         return _SRaw(source)
 
     @staticmethod
     def list(*items: SExp) -> SExp:
-        """Create a proper Lisp list expression."""
+        """Create a proper Lisp list expression.
+
+        An empty list renders as ``nil`` because Common Lisp's empty list and
+        false value are the same object.
+        """
         return _SList(tuple(items))
 
     @staticmethod
@@ -86,6 +114,8 @@ class SExp:
 
 @dataclass(frozen=True)
 class _SAtom(SExp):
+    """Leaf node for an already-rendered Lisp token."""
+
     token: str
 
     def __str__(self) -> str:
@@ -94,6 +124,8 @@ class _SAtom(SExp):
 
 @dataclass(frozen=True)
 class _SString(SExp):
+    """Leaf node for a Lisp string literal payload."""
+
     value: str
 
     def __str__(self) -> str:
@@ -102,6 +134,8 @@ class _SString(SExp):
 
 @dataclass(frozen=True)
 class _SRaw(SExp):
+    """Leaf node that emits trusted Lisp source unchanged."""
+
     source: str
 
     def __str__(self) -> str:
@@ -110,6 +144,8 @@ class _SRaw(SExp):
 
 @dataclass(frozen=True)
 class _SList(SExp):
+    """Node that renders a parenthesized proper list expression."""
+
     items: tuple[SExp, ...]
 
     def __str__(self) -> str:
@@ -120,6 +156,8 @@ class _SList(SExp):
 
 @dataclass(frozen=True)
 class _SQuote(SExp):
+    """Node that renders Common Lisp quote syntax."""
+
     value: SExp
 
     def __str__(self) -> str:
@@ -128,6 +166,8 @@ class _SQuote(SExp):
 
 @dataclass(frozen=True)
 class _SFunctionQuote(SExp):
+    """Node that renders Common Lisp function quote syntax."""
+
     value: SExp
 
     def __str__(self) -> str:
