@@ -151,6 +151,7 @@ Public API
    from eclpy import (
        Cons,
        EclError,
+       EclJSONEncoder,
        EclSession,
        Lisp,
        List,
@@ -485,6 +486,35 @@ details:
 	       except eclpy.EclError as exc:
 	           print(exc.condition_type)
 	           print(exc.message)
+
+Embed Lisp Values in JSON
+-------------------------
+
+``EclJSONEncoder`` is a ``json.JSONEncoder`` for ordinary JSON documents that
+happen to carry eclpy Lisp values -- ``Symbol``, ``Cons``, ``Reference``, or
+``fractions.Fraction`` -- mixed in with plain Python data, at any nesting
+depth. Pass it as ``cls=`` to the standard library's ``json.dumps``/``json.dump``:
+
+.. code-block:: python
+
+   import json
+   from fractions import Fraction
+
+   from eclpy import EclJSONEncoder, Symbol
+
+   doc = {"name": "example", "count": 3, "symbol": Symbol("CAR", "COMMON-LISP"),
+          "ratio": Fraction(1, 3)}
+   print(json.dumps(doc, cls=EclJSONEncoder))
+   # {"name": "example", "count": 3,
+   #  "symbol": {"type": "symbol", "name": "CAR", "package": "COMMON-LISP"},
+   #  "ratio": {"type": "ratio", "numerator": "1", "denominator": "3"}}
+
+Plain JSON-native values (``str``, ``int``, ``float``, ``bool``, ``None``,
+``list``, ``dict``) encode exactly as ``json.JSONEncoder`` normally would --
+only the embedded Lisp values render through ``protocol.to_protocol``. This is
+unrelated to the WASM wire protocol: it does not wrap the whole document in a
+protocol envelope, and it is never used internally by ``Lisp.eval`` or
+``EclSession``.
 
 Security Model
 --------------
