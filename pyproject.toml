@@ -43,6 +43,7 @@ include = [
     "/COPYING",
     "/LICENSE",
     "/README.rst",
+    "/docs",
     "/eclpy",
     "/native",
     "/patch",
